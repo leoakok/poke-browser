@@ -175,6 +175,8 @@ export async function startExtensionWebSocketServer(port, b, options = {}) {
     const authRequired = expectedToken !== undefined;
     const wss = new WebSocketServer({ port, host: "127.0.0.1" });
     const trackedClients = new Set();
+    /** Sockets that completed `hello`; used to promote the MCP bridge when the active client drops. */
+    const authenticatedClients = new Set();
     wss.on("error", (err) => {
         if (err.code === "EADDRINUSE") {
             log(`[poke-browser] Port ${port} is already in use.`);
@@ -196,16 +198,7 @@ export async function startExtensionWebSocketServer(port, b, options = {}) {
             }
             return;
         }
-        for (const client of wss.clients) {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
-                try {
-                    client.close(4000, "replaced by new poke-browser connection");
-                }
-                catch {
-                    /* ignore */
-                }
-            }
-        }
+        // Allow multiple extension connections; do not close existing clients with 4000 (reconnect loop).
         trackedClients.add(ws);
         let authenticated = false;
         let pingInterval = null;
@@ -298,6 +291,7 @@ export async function startExtensionWebSocketServer(port, b, options = {}) {
                     return;
                 }
                 authenticated = true;
+                authenticatedClients.add(ws);
                 b.attachSocket(ws);
                 try {
                     ws.send(JSON.stringify({ type: "auth_ok" }));
@@ -317,8 +311,19 @@ export async function startExtensionWebSocketServer(port, b, options = {}) {
             stopPing();
             trackedClients.delete(ws);
             if (authenticated) {
+                authenticatedClients.delete(ws);
                 b.clearSocket(ws);
-                b.rejectAllPending("Chrome extension WebSocket disconnected");
+                if (!b.isReady()) {
+                    for (const c of authenticatedClients) {
+                        if (c.readyState === WebSocket.OPEN) {
+                            b.attachSocket(c);
+                            break;
+                        }
+                    }
+                }
+                if (!b.isReady()) {
+                    b.rejectAllPending("Chrome extension WebSocket disconnected");
+                }
             }
             console.error("[poke-browser-mcp] Extension WebSocket client disconnected");
         });

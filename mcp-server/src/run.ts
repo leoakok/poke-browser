@@ -295,20 +295,6 @@ async function runHttp(opts: {
     process.env.POKE_BROWSER_TUNNEL_NAME?.trim() || "poke-browser";
 
   if (opts.spawnTunnel) {
-    const apiKey = (process.env.POKE_API_KEY ?? "").trim();
-    if (!apiKey) {
-      log(
-        "[poke-browser] No POKE_API_KEY set - running without tunnel (local only)",
-      );
-      console.error(
-        `[poke-browser-mcp] Poke (local): npx --yes poke@latest tunnel ${url} -n "${pokeTunnelLabel}"`,
-      );
-      log(
-        "[poke-browser] Ready. Load the Chrome extension and connect your MCP client.",
-      );
-      return;
-    }
-
     console.error("[poke-browser-mcp] Tunnel output from Poke follows.");
     console.error("");
 
