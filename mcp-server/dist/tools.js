@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { bridge, EVALUATE_JS_TIMEOUT_MS, isScreenshotResultPayload, jsonText, PENDING_REQUEST_TIMEOUT_MS, } from "./transport.js";
+import { bridge, EVALUATE_JS_TIMEOUT_MS, isScreenshotResultPayload, jsonText, PENDING_REQUEST_TIMEOUT_MS, RateLimitError, } from "./transport.js";
 export function toolText(data) {
     return {
         content: [{ type: "text", text: jsonText(data) }],
@@ -17,6 +17,9 @@ async function callTool(command, payload, timeoutMs = PENDING_REQUEST_TIMEOUT_MS
         return toolText(result);
     }
     catch (e) {
+        if (e instanceof RateLimitError) {
+            return toolText({ error: "rate_limit_exceeded", retryAfter: e.retryAfter });
+        }
         const msg = e instanceof Error ? e.message : String(e);
         return toolError(msg);
     }
@@ -119,9 +122,64 @@ export function registerTools(mcp) {
             };
         }
         catch (e) {
+            if (e instanceof RateLimitError) {
+                return toolText({ error: "rate_limit_exceeded", retryAfter: e.retryAfter });
+            }
             return toolError(e instanceof Error ? e.message : String(e));
         }
     });
+    mcp.registerTool("full_page_capture", {
+        description: "Capture a full-page screenshot by scrolling the viewport and stitching strips (OffscreenCanvas). Slower than capture_screenshot; may duplicate fixed headers between strips.",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+            format: z.enum(["png", "jpeg"]).optional(),
+            quality: z.number().min(0).max(100).optional().describe("JPEG quality when format is jpeg"),
+        },
+    }, async ({ tabId, format, quality }) => {
+        if (!bridge.isReady()) {
+            return toolError("Chrome extension is not connected. Load poke-browser in Chrome and ensure the WebSocket port matches POKE_BROWSER_WS_PORT.");
+        }
+        try {
+            const result = await bridge.request("full_page_capture", { tabId, format: format ?? "png", quality }, 120_000);
+            if (!isScreenshotResultPayload(result)) {
+                return toolError("Extension returned an invalid full_page_capture payload.");
+            }
+            return {
+                content: [
+                    {
+                        type: "image",
+                        data: result.data,
+                        mimeType: result.mimeType,
+                    },
+                ],
+            };
+        }
+        catch (e) {
+            if (e instanceof RateLimitError) {
+                return toolText({ error: "rate_limit_exceeded", retryAfter: e.retryAfter });
+            }
+            return toolError(e instanceof Error ? e.message : String(e));
+        }
+    });
+    mcp.registerTool("pdf_export", {
+        description: "Export the current page as PDF via CDP Page.printToPDF (printBackground true). Returns base64-encoded PDF data.",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+            landscape: z.boolean().optional(),
+            scale: z.number().positive().max(2).optional().describe("Scale factor (default 1)"),
+        },
+    }, async ({ tabId, landscape, scale }) => callTool("pdf_export", { tabId, landscape, scale }, 120_000));
+    mcp.registerTool("device_emulate", {
+        description: "Apply CDP device metrics and optional user-agent override (mobile/tablet/desktop presets). Debugger attaches briefly; viewport may reset when the session detaches.",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+            device: z.enum(["mobile", "tablet", "desktop"]).optional().describe("Preset (default desktop)"),
+            width: z.number().int().positive().optional(),
+            height: z.number().int().positive().optional(),
+            deviceScaleFactor: z.number().positive().optional(),
+            userAgent: z.string().optional(),
+        },
+    }, async ({ tabId, device, width, height, deviceScaleFactor, userAgent }) => callTool("device_emulate", { tabId, device, width, height, deviceScaleFactor, userAgent }, 30_000));
     mcp.registerTool("manage_tabs", {
         description: "List tabs, read the active tab, open, close, or switch tabs in the connected Chrome profile.",
         inputSchema: manageTabsInputSchema,
@@ -237,6 +295,19 @@ export function registerTools(mcp) {
             args: z.array(z.unknown()).optional().describe("Array available inside the script as `args`"),
         },
     }, async ({ script, tabId, args }) => callTool("execute_script", { script, tabId, args: args ?? [] }, 60_000));
+    mcp.registerTool("error_reporter", {
+        description: "Return the last N uncaught page errors and unhandled promise rejections (separate from console logs): message, stack, filename, line/column, timestamp.",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+            limit: z.number().int().positive().max(200).optional().describe("Max entries (default 50)"),
+        },
+    }, async ({ tabId, limit }) => callTool("error_reporter", { tabId, limit: limit ?? 50 }));
+    mcp.registerTool("get_performance_metrics", {
+        description: "Navigation timing (domContentLoaded, loadEventEnd), paint timings (firstPaint, firstContentfulPaint), and JS heap from CDP Performance.getMetrics (requires debugger attach briefly).",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+        },
+    }, async ({ tabId }) => callTool("get_performance_metrics", { tabId }, EVALUATE_JS_TIMEOUT_MS));
     mcp.registerTool("get_console_logs", {
         description: "Read console entries captured by the content script ring buffer (max 500). Requires the page to have loaded the poke-browser content script.",
         inputSchema: {

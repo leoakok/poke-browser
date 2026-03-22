@@ -3,7 +3,7 @@ import { PassThrough } from "node:stream";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { bridge, readPort, startExtensionWebSocketServer } from "./transport.js";
+import { bridge, readPort, readWebSocketAuthToken, startExtensionWebSocketServer, } from "./transport.js";
 import { createPokeBrowserMcpServer } from "./server.js";
 const DEFAULT_MCP_HTTP_PORT = 8755;
 let processGuardsInstalled = false;
@@ -46,10 +46,16 @@ export function parseArgs(argv) {
     }
     return { mode: "stdio", mcpHttpPort: readMcpHttpPortFromEnv() };
 }
+function logAndStartExtensionWebSocket(port) {
+    const authToken = readWebSocketAuthToken();
+    console.error(`[poke-browser-mcp] WebSocket auth token: ${authToken}`);
+    console.error("[poke-browser-mcp] Set the extension popup Auth token (storage key wsAuthToken) to match, or set POKE_BROWSER_TOKEN before starting the server.");
+    return startExtensionWebSocketServer(port, bridge, { authToken });
+}
 async function runStdio() {
     const WS_PORT = readPort();
     try {
-        await startExtensionWebSocketServer(WS_PORT, bridge);
+        await logAndStartExtensionWebSocket(WS_PORT);
     }
     catch (err) {
         console.error("[poke-browser-mcp] WebSocket server failed to bind (is another poke-browser or process using the port?):", err);
@@ -75,7 +81,7 @@ async function runStdio() {
 async function runHttp(opts) {
     const WS_PORT = readPort();
     try {
-        await startExtensionWebSocketServer(WS_PORT, bridge);
+        await logAndStartExtensionWebSocket(WS_PORT);
     }
     catch (err) {
         console.error("[poke-browser-mcp] WebSocket server failed to bind:", err);
