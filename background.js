@@ -505,12 +505,51 @@ async function clickViaDebugger(tabId, x, y) {
 }
 
 /**
+ * Select-all then Backspace via CDP so the focused field is cleared before typing.
+ * @param {number} tabId
+ */
+async function clearFocusedFieldViaDebuggerKeys(tabId) {
+  const info = await chrome.runtime.getPlatformInfo();
+  const mod = info.os === "mac" ? 4 : 2;
+  await debuggerSend(tabId, "Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "a",
+    code: "KeyA",
+    windowsVirtualKeyCode: 65,
+    modifiers: mod,
+  });
+  await debuggerSend(tabId, "Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "a",
+    code: "KeyA",
+    windowsVirtualKeyCode: 65,
+    modifiers: mod,
+  });
+  await debuggerSend(tabId, "Input.dispatchKeyEvent", {
+    type: "keyDown",
+    key: "Backspace",
+    code: "Backspace",
+    windowsVirtualKeyCode: 8,
+  });
+  await debuggerSend(tabId, "Input.dispatchKeyEvent", {
+    type: "keyUp",
+    key: "Backspace",
+    code: "Backspace",
+    windowsVirtualKeyCode: 8,
+  });
+}
+
+/**
  * @param {number} tabId
  * @param {string} text
+ * @param {boolean} [clearField]
  */
-async function typeTextViaDebugger(tabId, text) {
+async function typeTextViaDebugger(tabId, text, clearField) {
   await debuggerAttachForTool(tabId);
   try {
+    if (clearField) {
+      await clearFocusedFieldViaDebuggerKeys(tabId);
+    }
     for (const ch of text) {
       if (ch === "\n" || ch === "\r") {
         if (ch === "\r") continue;
@@ -701,7 +740,7 @@ async function handleTypeText(payload) {
   const text = typeof p.text === "string" ? p.text : "";
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
   const selector = typeof p.selector === "string" ? p.selector : undefined;
-  const clearFirst = p.clearFirst === true;
+  const shouldClear = p.clear !== false;
   const tx = typeof p.x === "number" ? p.x : Number(p.x);
   const ty = typeof p.y === "number" ? p.y : Number(p.y);
   const hasXY = Number.isFinite(tx) && Number.isFinite(ty);
@@ -712,7 +751,7 @@ async function handleTypeText(payload) {
       type: "POKE_TYPE_TEXT",
       text,
       selector,
-      clearFirst,
+      clear: shouldClear,
     })
     .catch(() => null);
 
@@ -722,7 +761,7 @@ async function handleTypeText(payload) {
       charsTyped: typeof res.charsTyped === "number" ? res.charsTyped : text.length,
     });
   }
-  const dbg = await typeTextViaDebugger(tabId, text);
+  const dbg = await typeTextViaDebugger(tabId, text, shouldClear);
   return withTabMeta(tabId, dbg);
 }
 

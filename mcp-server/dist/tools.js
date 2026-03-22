@@ -101,7 +101,7 @@ const BROWSER_GUIDE_MARKDOWN = `## Poke Browser MCP — agent guide
 - **browser_guide** — This playbook (static Markdown; no parameters).
 - **navigate_to** — Open a URL in a tab; waits for load (short or long timeout).
 - **click_element** — Click via CSS/XPath selector (content script) or viewport **x**/**y** (CDP).
-- **type_text** — Type into an input/textarea/contenteditable (or focused element).
+- **type_text** — Type into an input/textarea/contenteditable (or focused element); optional **clear** (default true) replaces existing value first.
 - **scroll_window** — Scroll the page (selector into view, absolute position, deltas, or direction).
 - **capture_screenshot** — Visible viewport screenshot (PNG/JPEG).
 - **capture_and_upload_screenshot** — Same capture, then multipart POST to \`uploadUrl\` or \`POKE_UPLOAD_URL\`; on failure returns base64 + temp path.
@@ -199,16 +199,26 @@ export function registerTools(mcp) {
         },
     }, async ({ selector, x, y, tabId }) => callTool("click_element", { selector, x, y, tabId }));
     mcp.registerTool("type_text", {
-        description: "Type into an input, textarea, or contenteditable (selector optional; uses focused element if omitted). Falls back to CDP key events.",
+        description: "Type into an input, textarea, or contenteditable (selector optional; uses focused element if omitted). When clear is true (default), the extension selects all and deletes existing content before typing (content script or CDP key events on fallback). Set clear false to append without clearing.",
         inputSchema: {
             text: z.string().describe("Text to type"),
             selector: z.string().min(1).optional(),
             x: z.number().optional().describe("Optional viewport X — shows brief cursor feedback dot in the tab"),
             y: z.number().optional().describe("Optional viewport Y — shows brief cursor feedback dot in the tab"),
             tabId: tabIdSchema.optional(),
-            clearFirst: z.boolean().optional().describe("Select-all and replace field contents first"),
+            clear: z
+                .boolean()
+                .optional()
+                .describe("If true (default), select-all and delete existing content before typing"),
         },
-    }, async ({ text, selector, x, y, tabId, clearFirst }) => callTool("type_text", { text, selector, x, y, tabId, clearFirst }));
+    }, async ({ text, selector, x, y, tabId, clear }) => callTool("type_text", {
+        text,
+        selector,
+        x,
+        y,
+        tabId,
+        clear: clear !== false,
+    }));
     mcp.registerTool("scroll_window", {
         description: "Scroll the target tab's main frame (via injected main-world script). Use selector to scroll an element into view; x/y for absolute scroll position; deltaX/deltaY for relative scroll; or direction (up/down/left/right) with optional amount (pixels, default ~85% of viewport). Precedence: selector, then absolute x/y, then direction+deltas, then deltaX/deltaY alone.",
         inputSchema: {
@@ -479,7 +489,7 @@ export function registerTools(mcp) {
         },
     }, async ({ tabId, interactiveOnly }) => callTool("get_accessibility_tree", { tabId, interactiveOnly }, EVALUATE_JS_TIMEOUT_MS));
     mcp.registerTool("find_element", {
-        description: "Find up to 5 elements by CSS selector, visible text, ARIA/title/alt, or XPath. Strategy auto tries css, then text, then aria. Prefer this over raw coordinates — always get bounding rect first, then compute center.",
+        description: "Find up to 5 elements by CSS selector, visible text, ARIA/title/alt, or XPath. Strategy auto tries css, then text, then aria. Prefer this over raw coordinates — always get bounding rect first, then compute center. TIP: When you need to look up multiple elements, prefer calling get_dom_snapshot once and searching within that result — it is more efficient than multiple find_element round-trips.",
         inputSchema: {
             query: z.string().min(1).describe("Selector string, text snippet, aria substring, or XPath expression"),
             tabId: tabIdSchema.optional(),

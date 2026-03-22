@@ -231,9 +231,9 @@ function handleClickElement(message, sendResponse) {
  * @param {(r: unknown) => void} sendResponse
  */
 function handleTypeText(message, sendResponse) {
-  const m = /** @type {{ text?: string; selector?: string; clearFirst?: boolean }} */ (message);
+  const m = /** @type {{ text?: string; selector?: string; clear?: boolean }} */ (message);
   const text = typeof m.text === "string" ? m.text : "";
-  const clearFirst = m.clearFirst === true;
+  const shouldClear = m.clear !== false;
   let el = null;
   if (typeof m.selector === "string" && m.selector.trim()) {
     el = querySelectorOrXPath(m.selector);
@@ -249,7 +249,7 @@ function handleTypeText(message, sendResponse) {
   try {
     if (el.isContentEditable) {
       el.focus();
-      if (clearFirst) {
+      if (shouldClear) {
         const sel = window.getSelection();
         if (sel && el.firstChild) {
           const range = document.createRange();
@@ -272,7 +272,7 @@ function handleTypeText(message, sendResponse) {
     if (tag === "input" || tag === "textarea") {
       const input = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (el);
       input.focus();
-      if (clearFirst) {
+      if (shouldClear) {
         input.select();
         document.execCommand("delete");
         input.value = text;
