@@ -2,7 +2,7 @@ import { WebSocketServer, WebSocket } from "ws";
 export declare const DEFAULT_PORT = 9009;
 export declare const PENDING_REQUEST_TIMEOUT_MS = 10000;
 export declare const EVALUATE_JS_TIMEOUT_MS = 60000;
-export type ExtensionCommand = "list_tabs" | "get_active_tab" | "navigate_to" | "click_element" | "type_text" | "scroll_window" | "screenshot" | "evaluate_js" | "new_tab" | "close_tab" | "switch_tab";
+export type ExtensionCommand = "list_tabs" | "get_active_tab" | "navigate_to" | "click_element" | "type_text" | "scroll_window" | "screenshot" | "evaluate_js" | "new_tab" | "close_tab" | "switch_tab" | "get_dom_snapshot" | "get_accessibility_tree" | "find_element" | "read_page" | "wait_for_selector" | "execute_script" | "get_console_logs" | "clear_console_logs" | "get_network_logs" | "clear_network_logs" | "start_network_capture" | "stop_network_capture" | "hover_element";
 export type CommandMessage = {
     type: "command";
     requestId: string;

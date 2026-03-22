@@ -452,6 +452,61 @@ async function handleEvaluateJs(payload) {
   return res;
 }
 
+/**
+ * @param {number} tabId
+ * @param {string} pokeType
+ * @param {Record<string, unknown>} data
+ */
+async function sendPerceptionToTab(tabId, pokeType, data) {
+  const res = await chrome.tabs.sendMessage(tabId, { ...data, type: pokeType }).catch((e) => {
+    throw new Error(`Perception relay failed (${pokeType}): ${String(e)}`);
+  });
+  if (res && typeof res === "object" && "error" in res && typeof res.error === "string") {
+    throw new Error(res.error);
+  }
+  return res;
+}
+
+/** @param {unknown} payload */
+async function handleGetDomSnapshot(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  return sendPerceptionToTab(tabId, "POKE_GET_DOM_SNAPSHOT", {
+    includeHidden: p.includeHidden === true,
+    maxDepth: typeof p.maxDepth === "number" ? p.maxDepth : undefined,
+  });
+}
+
+/** @param {unknown} payload */
+async function handleGetAccessibilityTree(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  return sendPerceptionToTab(tabId, "POKE_GET_A11Y_TREE", {
+    interactiveOnly: p.interactiveOnly === true,
+  });
+}
+
+/** @param {unknown} payload */
+async function handleFindElement(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  const query = typeof p.query === "string" ? p.query : "";
+  const strategy =
+    p.strategy === "css" || p.strategy === "text" || p.strategy === "aria" || p.strategy === "xpath"
+      ? p.strategy
+      : "auto";
+  return sendPerceptionToTab(tabId, "POKE_FIND_ELEMENT", { query, strategy });
+}
+
+/** @param {unknown} payload */
+async function handleReadPage(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  const format =
+    p.format === "markdown" || p.format === "text" || p.format === "structured" ? p.format : "structured";
+  return sendPerceptionToTab(tabId, "POKE_READ_PAGE", { format });
+}
+
 /** @param {unknown} payload */
 async function handleNewTab(payload) {
   const p = asPayload(payload);
@@ -502,6 +557,10 @@ const COMMAND_HANDLERS = {
   new_tab: handleNewTab,
   close_tab: handleCloseTab,
   switch_tab: handleSwitchTab,
+  get_dom_snapshot: handleGetDomSnapshot,
+  get_accessibility_tree: handleGetAccessibilityTree,
+  find_element: handleFindElement,
+  read_page: handleReadPage,
 };
 
 /**

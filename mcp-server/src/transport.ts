@@ -16,7 +16,20 @@ export type ExtensionCommand =
   | "evaluate_js"
   | "new_tab"
   | "close_tab"
-  | "switch_tab";
+  | "switch_tab"
+  | "get_dom_snapshot"
+  | "get_accessibility_tree"
+  | "find_element"
+  | "read_page"
+  | "wait_for_selector"
+  | "execute_script"
+  | "get_console_logs"
+  | "clear_console_logs"
+  | "get_network_logs"
+  | "clear_network_logs"
+  | "start_network_capture"
+  | "stop_network_capture"
+  | "hover_element";
 
 export type CommandMessage = {
   type: "command";

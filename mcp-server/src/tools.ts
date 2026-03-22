@@ -223,4 +223,80 @@ export function registerTools(mcp: McpServer): void {
     async ({ code, tabId, timeoutMs }) =>
       callTool("evaluate_js", { code, tabId, timeoutMs }, EVALUATE_JS_TIMEOUT_MS)
   );
+
+  mcp.registerTool(
+    "get_dom_snapshot",
+    {
+      description:
+        "Capture a compact DOM tree from the active (or chosen) tab: tags, ids, classes, roles, aria-label, short text, bounding rects, interactivity, and children up to maxDepth.",
+      inputSchema: {
+        tabId: tabIdSchema.optional().describe("Tab to read; defaults to active tab in focused window"),
+        includeHidden: z
+          .boolean()
+          .optional()
+          .describe("If true, include display:none / visibility:hidden and offsetParent-null nodes (default false)"),
+        maxDepth: z
+          .number()
+          .int()
+          .min(0)
+          .max(50)
+          .optional()
+          .describe("Max depth from document.body (default 6)"),
+      },
+    },
+    async ({ tabId, includeHidden, maxDepth }) =>
+      callTool("get_dom_snapshot", { tabId, includeHidden, maxDepth }, EVALUATE_JS_TIMEOUT_MS)
+  );
+
+  mcp.registerTool(
+    "get_accessibility_tree",
+    {
+      description:
+        "Flat list of semantic nodes (roles, names, selectors, heading levels, form state) in reading order (top-to-bottom, left-to-right).",
+      inputSchema: {
+        tabId: tabIdSchema.optional(),
+        interactiveOnly: z
+          .boolean()
+          .optional()
+          .describe("If true, only focusable / interactive elements (default false)"),
+      },
+    },
+    async ({ tabId, interactiveOnly }) =>
+      callTool("get_accessibility_tree", { tabId, interactiveOnly }, EVALUATE_JS_TIMEOUT_MS)
+  );
+
+  mcp.registerTool(
+    "find_element",
+    {
+      description:
+        "Find up to 5 elements by CSS selector, visible text, ARIA/title/alt, or XPath. Strategy auto tries css, then text, then aria.",
+      inputSchema: {
+        query: z.string().min(1).describe("Selector string, text snippet, aria substring, or XPath expression"),
+        tabId: tabIdSchema.optional(),
+        strategy: z
+          .enum(["auto", "css", "text", "aria", "xpath"])
+          .optional()
+          .describe("Matching strategy (default auto)"),
+      },
+    },
+    async ({ query, tabId, strategy }) =>
+      callTool("find_element", { query, tabId, strategy }, EVALUATE_JS_TIMEOUT_MS)
+  );
+
+  mcp.registerTool(
+    "read_page",
+    {
+      description:
+        "Extract page content as structured data (default), plain text, or lightweight markdown (headings, links, lists, code). Skips script/style/nav/header/footer noise.",
+      inputSchema: {
+        tabId: tabIdSchema.optional(),
+        format: z
+          .enum(["markdown", "text", "structured"])
+          .optional()
+          .describe("structured (default), text, or markdown"),
+      },
+    },
+    async ({ tabId, format }) =>
+      callTool("read_page", { tabId, format }, EVALUATE_JS_TIMEOUT_MS)
+  );
 }
