@@ -3,7 +3,13 @@
  * service worker suspension (service workers cannot keep long-lived sockets).
  */
 
-const DEFAULT_WS_PORT = 9009;
+/** Offscreen documents cannot use chrome.storage; port comes from the document URL (set by background). */
+const params = new URLSearchParams(location.search);
+let mcpPort = Number.parseInt(params.get("port") ?? "9009", 10);
+if (!Number.isFinite(mcpPort) || mcpPort <= 0 || mcpPort > 65535) {
+  mcpPort = 9009;
+}
+
 const WS_INITIAL_RETRY_MS = 1000;
 const WS_MAX_RETRY_MS = 30000;
 const WS_MAX_RETRIES = 20;
@@ -74,19 +80,6 @@ function resetWebSocketBackoff() {
   wsReconnectCycles = 0;
 }
 
-async function getWsPort() {
-  const { wsPort } = await chrome.storage.local.get("wsPort");
-  if (typeof wsPort === "number" && Number.isFinite(wsPort) && wsPort > 0 && wsPort < 65536) {
-    return wsPort;
-  }
-  return DEFAULT_WS_PORT;
-}
-
-async function getWsAuthToken() {
-  const { wsAuthToken } = await chrome.storage.local.get("wsAuthToken");
-  return typeof wsAuthToken === "string" ? wsAuthToken : "";
-}
-
 function connectMcpSocket() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
     console.log("[poke-browser offscreen] connect skipped (socket already open/connecting)");
@@ -94,85 +87,92 @@ function connectMcpSocket() {
   }
 
   notifyStatus("connecting");
-  getWsPort().then((port) => {
-    const url = `ws://127.0.0.1:${port}`;
-    console.log("[poke-browser offscreen] Connecting to", url);
-    try {
-      socket = new WebSocket(url);
-    } catch (e) {
-      notifyStatus("disconnected");
-      notifyLog("out", `WebSocket construct failed: ${String(e)}`);
-      scheduleReconnectAfterClose();
+  const url = `ws://127.0.0.1:${mcpPort}`;
+  console.log("[poke-browser offscreen] Connecting to", url);
+  try {
+    socket = new WebSocket(url);
+  } catch (e) {
+    notifyStatus("disconnected");
+    notifyLog("out", `WebSocket construct failed: ${String(e)}`);
+    scheduleReconnectAfterClose();
+    return;
+  }
+
+  socket.addEventListener("open", () => {
+    resetWebSocketBackoff();
+    notifyStatus("connected");
+    notifyLog("out", `Connected to MCP WebSocket ${url}`);
+    postToBg({ type: "request_hello_credentials" });
+  });
+
+  socket.addEventListener("message", (event) => {
+    const raw = String(event.data);
+    console.log("[poke-browser offscreen] From MCP (first 200 chars):", raw.slice(0, 200));
+    postToBg({ type: "ws_frame", raw });
+  });
+
+  socket.addEventListener("close", (event) => {
+    notifyStatus("disconnected");
+    console.error(
+      "[poke-browser offscreen] WebSocket CLOSED, code:",
+      event.code,
+      "reason:",
+      event.reason,
+      "wasClean:",
+      event.wasClean,
+    );
+    notifyLog("out", "WebSocket closed");
+    socket = null;
+    if (suppressReconnectOnce) {
+      suppressReconnectOnce = false;
       return;
     }
+    if (event.code === 1000 || event.code === 1001) {
+      console.error("[poke-browser offscreen] Clean close, not reconnecting");
+      return;
+    }
+    scheduleReconnectAfterClose(event.code);
+  });
 
-    socket.addEventListener("open", () => {
-      resetWebSocketBackoff();
-      notifyStatus("connected");
-      notifyLog("out", `Connected to MCP WebSocket ${url}`);
-      void (async () => {
-        const token = await getWsAuthToken();
-        const hello =
-          token.length > 0
-            ? {
-                type: "hello",
-                token,
-                client: "poke-browser-extension",
-                version: chrome.runtime.getManifest().version,
-              }
-            : {
-                type: "hello",
-                client: "poke-browser-extension",
-                version: chrome.runtime.getManifest().version,
-              };
-        try {
-          socket?.send(JSON.stringify(hello));
-        } catch {
-          /* ignore */
-        }
-      })();
-    });
-
-    socket.addEventListener("message", (event) => {
-      const raw = String(event.data);
-      console.log("[poke-browser offscreen] From MCP (first 200 chars):", raw.slice(0, 200));
-      postToBg({ type: "ws_frame", raw });
-    });
-
-    socket.addEventListener("close", (event) => {
-      notifyStatus("disconnected");
-      console.error(
-        "[poke-browser offscreen] WebSocket CLOSED, code:",
-        event.code,
-        "reason:",
-        event.reason,
-        "wasClean:",
-        event.wasClean,
-      );
-      notifyLog("out", "WebSocket closed");
-      socket = null;
-      if (suppressReconnectOnce) {
-        suppressReconnectOnce = false;
-        return;
-      }
-      if (event.code === 1000 || event.code === 1001) {
-        console.error("[poke-browser offscreen] Clean close, not reconnecting");
-        return;
-      }
-      scheduleReconnectAfterClose(event.code);
-    });
-
-    socket.addEventListener("error", (event) => {
-      console.error("[poke-browser offscreen] WebSocket ERROR:", event);
-      notifyLog("out", "WebSocket error (see close for reconnect)");
-    });
+  socket.addEventListener("error", (event) => {
+    console.error("[poke-browser offscreen] WebSocket ERROR:", event);
+    notifyLog("out", "WebSocket error (see close for reconnect)");
   });
 }
 
 /**
  * @param {{ type?: string, payload?: unknown }} msg
  */
+function sendHelloFromCredentials(msg) {
+  const token = typeof msg.token === "string" ? msg.token : "";
+  const version = typeof msg.version === "string" ? msg.version : "0";
+  const hello =
+    token.length > 0
+      ? {
+          type: "hello",
+          token,
+          client: "poke-browser-extension",
+          version,
+        }
+      : {
+          type: "hello",
+          client: "poke-browser-extension",
+          version,
+        };
+  try {
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(hello));
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function handleFromBg(msg) {
+  if (msg.type === "hello_credentials") {
+    sendHelloFromCredentials(msg);
+    return;
+  }
   if (msg.type === "ws_send" && msg.payload !== undefined) {
     try {
       if (socket?.readyState === WebSocket.OPEN) {
@@ -185,6 +185,9 @@ function handleFromBg(msg) {
     return;
   }
   if (msg.type === "reconnect") {
+    if (typeof msg.port === "number" && Number.isFinite(msg.port) && msg.port > 0 && msg.port < 65536) {
+      mcpPort = Math.trunc(msg.port);
+    }
     clearReconnectTimer();
     resetWebSocketBackoff();
     if (socket) {

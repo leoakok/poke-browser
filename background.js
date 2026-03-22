@@ -58,8 +58,11 @@ function setStatus(next) {
 async function ensureOffscreenDocument() {
   const has = await chrome.offscreen.hasDocument();
   if (has) return;
+  const wsPort = await getWsPort();
+  const docUrl = new URL(chrome.runtime.getURL("offscreen.html"));
+  docUrl.searchParams.set("port", String(wsPort));
   await chrome.offscreen.createDocument({
-    url: chrome.runtime.getURL("offscreen.html"),
+    url: docUrl.href,
     reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
     justification: "Maintain persistent WebSocket connection to poke-browser MCP server for browser automation",
   });
@@ -96,6 +99,20 @@ chrome.runtime.onConnect.addListener((port) => {
   bridgePort = port;
   console.log("[poke-browser ext] Offscreen bridge port connected");
   port.onMessage.addListener((msg) => {
+    if (msg && typeof msg === "object" && msg.type === "request_hello_credentials") {
+      void getWsAuthToken().then((token) => {
+        try {
+          port.postMessage({
+            type: "hello_credentials",
+            token,
+            version: chrome.runtime.getManifest().version,
+          });
+        } catch {
+          /* ignore */
+        }
+      });
+      return;
+    }
     if (msg && typeof msg === "object" && msg.type === "ws_frame" && typeof msg.raw === "string") {
       void handleSocketMessage(msg.raw).catch((err) => {
         logCommand("in", `Handler error: ${String(err)}`);
@@ -1564,7 +1581,7 @@ const RUNTIME_HANDLERS = {
     void chrome.storage.local.set({ wsPort: next }).then(async () => {
       await ensureOffscreenAndSchedule();
       try {
-        bridgePort?.postMessage({ type: "reconnect" });
+        bridgePort?.postMessage({ type: "reconnect", port: next });
       } catch {
         /* ignore */
       }
