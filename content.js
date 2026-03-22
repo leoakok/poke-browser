@@ -2,6 +2,54 @@
  * Relays automation commands from the service worker into the page.
  */
 
+const CONSOLE_RING_MAX = 500;
+
+/** @type {Array<{ level: string; message: string; timestamp: number; stack?: string }>} */
+let consoleRing = [];
+
+/**
+ * @param {unknown} a
+ */
+function formatConsoleArg(a) {
+  if (a instanceof Error) return a.stack || a.message;
+  if (typeof a === "object" && a !== null) {
+    try {
+      return JSON.stringify(a);
+    } catch {
+      return String(a);
+    }
+  }
+  return String(a);
+}
+
+/**
+ * @param {string} level
+ * @param {unknown[]} args
+ */
+function pushConsoleEntry(level, args) {
+  const message = args.map(formatConsoleArg).join(" ").slice(0, 20000);
+  const errArg = args.find((x) => x instanceof Error);
+  consoleRing.push({
+    level,
+    message,
+    timestamp: Date.now(),
+    stack: errArg instanceof Error ? errArg.stack : undefined,
+  });
+  while (consoleRing.length > CONSOLE_RING_MAX) consoleRing.shift();
+}
+
+["log", "info", "warn", "error"].forEach((level) => {
+  const orig = console[level].bind(console);
+  console[level] = function pokeConsolePatched(...args) {
+    try {
+      pushConsoleEntry(level, args);
+    } catch {
+      /* ignore ring failures */
+    }
+    orig(...args);
+  };
+});
+
 /**
  * @param {string} selector
  * @returns {Element | null}
@@ -789,9 +837,135 @@ function elementToMarkdown(el) {
  * @param {unknown} message
  * @param {(r: unknown) => void} sendResponse
  */
+/**
+ * @param {Element} el
+ * @param {boolean} requireVisible
+ */
+function elementMatchesVisible(el, requireVisible) {
+  if (!requireVisible) return true;
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.offsetParent === null) {
+    const st = getComputedStyle(el);
+    const pos = st.position;
+    if (pos !== "fixed" && pos !== "sticky") return false;
+  }
+  const st = getComputedStyle(el);
+  if (st.display === "none" || st.visibility === "hidden" || Number.parseFloat(st.opacity) === 0) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleWaitForSelector(message, sendResponse) {
+  const m = /** @type {{ selector?: string; timeout?: number; visible?: boolean }} */ (message);
+  const selector = typeof m.selector === "string" ? m.selector : "";
+  const timeout = typeof m.timeout === "number" && m.timeout > 0 ? m.timeout : 10000;
+  const visible = m.visible === true;
+  const start = Date.now();
+
+  /** @type {ReturnType<typeof setInterval> | undefined} */
+  let iv;
+
+  function tick() {
+    const el = querySelectorOrXPath(selector);
+    if (el && elementMatchesVisible(el, visible)) {
+      if (iv !== undefined) clearInterval(iv);
+      const r = el.getBoundingClientRect();
+      sendResponse({
+        found: true,
+        selector,
+        elapsed: Date.now() - start,
+        element: {
+          tag: el.tagName.toLowerCase(),
+          id: el.id || undefined,
+          text: (el.textContent || "").trim().slice(0, 200),
+          rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+        },
+      });
+      return;
+    }
+    if (Date.now() - start >= timeout) {
+      if (iv !== undefined) clearInterval(iv);
+      sendResponse({
+        found: false,
+        selector,
+        elapsed: Date.now() - start,
+        error: "timeout",
+      });
+    }
+  }
+
+  iv = setInterval(tick, 100);
+  tick();
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleGetConsoleLogs(message, sendResponse) {
+  const m = /** @type {{ level?: string; limit?: number }} */ (message);
+  const level = m.level === "error" || m.level === "warn" || m.level === "info" || m.level === "log" ? m.level : "all";
+  const limit = typeof m.limit === "number" ? Math.min(500, Math.max(1, m.limit)) : 100;
+  let logs = consoleRing;
+  if (level !== "all") {
+    logs = logs.filter((e) => e.level === level);
+  }
+  const sliced = logs.slice(-limit);
+  sendResponse({ logs: sliced, count: sliced.length });
+}
+
+/**
+ * @param {unknown} _message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleClearConsoleLogs(_message, sendResponse) {
+  consoleRing = [];
+  sendResponse({ cleared: true });
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleHoverElement(message, sendResponse) {
+  const m = /** @type {{ selector?: string }} */ (message);
+  const selector = typeof m.selector === "string" ? m.selector : "";
+  if (!selector.trim()) {
+    sendResponse({ success: false });
+    return;
+  }
+  const el = querySelectorOrXPath(selector);
+  if (!el) {
+    sendResponse({ success: false });
+    return;
+  }
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  const init = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+  el.dispatchEvent(new MouseEvent("mousemove", init));
+  el.dispatchEvent(new MouseEvent("mouseover", init));
+  el.dispatchEvent(new MouseEvent("mouseenter", init));
+  sendResponse({
+    success: true,
+    element: {
+      tag: el.tagName.toLowerCase(),
+      id: el.id || undefined,
+      text: (el.textContent || "").trim().slice(0, 200),
+      rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+    },
+  });
+}
+
 function handleReadPage(message, sendResponse) {
   const m = /** @type {{ format?: string }} */ (message);
-  const format = m.format === "markdown" || m.format === "text" ? m.format : "structured";
+  const format =
+    m.format === "markdown" || m.format === "text" || m.format === "structured" ? m.format : "structured";
   const root = getReadPageRoot();
   const title = document.title || "";
   const url = location.href;
@@ -827,6 +1001,10 @@ const MESSAGE_HANDLERS = {
   POKE_GET_A11Y_TREE: handleGetAccessibilityTree,
   POKE_FIND_ELEMENT: handleFindElement,
   POKE_READ_PAGE: handleReadPage,
+  POKE_WAIT_FOR_SELECTOR: handleWaitForSelector,
+  POKE_GET_CONSOLE_LOGS: handleGetConsoleLogs,
+  POKE_CLEAR_CONSOLE_LOGS: handleClearConsoleLogs,
+  POKE_HOVER_ELEMENT: handleHoverElement,
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
