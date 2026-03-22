@@ -99,6 +99,65 @@ function pushConsoleEntry(level, args) {
 });
 
 /**
+ * Query selector across the document tree and inside open shadow roots (same-document; does not cross iframes).
+ * @param {Document | ShadowRoot | Element} root
+ * @param {string} selector
+ * @returns {Element[]}
+ */
+function deepQueryAll(root, selector) {
+  /** @type {Element[]} */
+  const results = [];
+  try {
+    results.push(...root.querySelectorAll(selector));
+  } catch {
+    return results;
+  }
+  for (const el of root.querySelectorAll("*")) {
+    if (el.shadowRoot) {
+      results.push(...deepQueryAll(el.shadowRoot, selector));
+    }
+  }
+  return results;
+}
+
+/**
+ * XPath across the light tree and each open shadow root (shadow evaluated with that root as context).
+ * @param {string} expr
+ * @returns {Element[]}
+ */
+function deepXPathAll(expr) {
+  /** @type {Element[]} */
+  const out = [];
+  /**
+   * @param {Document | ShadowRoot} context
+   */
+  function collectFrom(context) {
+    try {
+      const r = document.evaluate(expr, context, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+      for (let i = 0; i < r.snapshotLength; i++) {
+        const n = r.snapshotItem(i);
+        if (n instanceof Element) out.push(n);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  collectFrom(document);
+  /**
+   * @param {Element} el
+   */
+  function walk(el) {
+    if (el.shadowRoot) {
+      collectFrom(el.shadowRoot);
+      for (const c of el.shadowRoot.children) walk(c);
+    }
+    for (const c of el.children) walk(c);
+  }
+  if (document.documentElement) walk(document.documentElement);
+  return out;
+}
+
+/**
  * @param {string} selector
  * @returns {Element | null}
  */
@@ -106,19 +165,11 @@ function querySelectorOrXPath(selector) {
   const s = selector.trim();
   if (s.startsWith("//") || s.toLowerCase().startsWith("xpath:")) {
     const expr = s.toLowerCase().startsWith("xpath:") ? s.slice(6).trim() : s;
-    try {
-      const r = document.evaluate(expr, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-      const node = r.singleNodeValue;
-      return node instanceof Element ? node : null;
-    } catch {
-      return null;
-    }
+    const all = deepXPathAll(expr);
+    return all[0] ?? null;
   }
-  try {
-    return document.querySelector(s);
-  } catch {
-    return null;
-  }
+  const all = deepQueryAll(document, s);
+  return all[0] ?? null;
 }
 
 /**
@@ -366,7 +417,7 @@ function cssEscapeId(id) {
  */
 function uniqueSelector(el) {
   if (!(el instanceof Element)) return "";
-  if (el.id && document.querySelectorAll(`#${cssEscapeId(el.id)}`).length === 1) {
+  if (el.id && deepQueryAll(document, `#${cssEscapeId(el.id)}`).length === 1) {
     return `#${cssEscapeId(el.id)}`;
   }
   const parts = [];
@@ -446,8 +497,9 @@ function trimText(el, maxLen) {
  * @param {number} depth
  * @param {number} maxDepth
  * @param {boolean} includeHidden
+ * @param {boolean} [inShadow]
  */
-function buildDomSnapshotNode(el, depth, maxDepth, includeHidden) {
+function buildDomSnapshotNode(el, depth, maxDepth, includeHidden, inShadow) {
   if (depth > maxDepth) return null;
   if (isSkippedHidden(el, includeHidden)) return null;
   const r = el.getBoundingClientRect();
@@ -457,6 +509,7 @@ function buildDomSnapshotNode(el, depth, maxDepth, includeHidden) {
     rect: { x: r.x, y: r.y, width: r.width, height: r.height },
     interactive: elementInteractive(el),
   };
+  if (inShadow) node.isShadow = true;
   if (el.id) node.id = el.id;
   const cls =
     typeof el.className === "string" && el.className.trim()
@@ -472,8 +525,14 @@ function buildDomSnapshotNode(el, depth, maxDepth, includeHidden) {
   const childEls = Array.from(el.children);
   const children = [];
   for (const c of childEls) {
-    const sn = buildDomSnapshotNode(c, depth + 1, maxDepth, includeHidden);
+    const sn = buildDomSnapshotNode(c, depth + 1, maxDepth, includeHidden, inShadow);
     if (sn) children.push(sn);
+  }
+  if (el.shadowRoot) {
+    for (const c of Array.from(el.shadowRoot.children)) {
+      const sn = buildDomSnapshotNode(c, depth + 1, maxDepth, includeHidden, true);
+      if (sn) children.push(sn);
+    }
   }
   if (children.length) node.children = children;
   return node;
@@ -614,17 +673,7 @@ function handleGetAccessibilityTree(message, sendResponse) {
  * @returns {Element[]}
  */
 function xpathElements(expr) {
-  const out = [];
-  try {
-    const r = document.evaluate(expr, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-    for (let i = 0; i < r.snapshotLength; i++) {
-      const n = r.snapshotItem(i);
-      if (n instanceof Element) out.push(n);
-    }
-  } catch {
-    /* ignore */
-  }
-  return out;
+  return deepXPathAll(expr);
 }
 
 /**
@@ -634,7 +683,7 @@ function xpathElements(expr) {
 function findElementsByText(q) {
   const ql = q.toLowerCase().trim();
   if (!ql) return [];
-  const all = document.body ? document.body.querySelectorAll("*") : [];
+  const all = deepQueryAll(document, "*");
   /** @type {Element[]} */
   const exact = [];
   /** @type {Element[]} */
@@ -679,7 +728,7 @@ function filterOutAncestors(els) {
 function findElementsByAria(q) {
   const ql = q.toLowerCase().trim();
   if (!ql) return [];
-  const all = document.body ? document.body.querySelectorAll("*") : [];
+  const all = deepQueryAll(document, "*");
   /** @type {Element[]} */
   const hits = [];
   for (const el of all) {
@@ -743,7 +792,7 @@ function handleFindElement(message, sendResponse) {
 
   function tryCss() {
     try {
-      return Array.from(document.querySelectorAll(query));
+      return deepQueryAll(document, query);
     } catch {
       return [];
     }
