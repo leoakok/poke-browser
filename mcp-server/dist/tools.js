@@ -1,5 +1,17 @@
 import { z } from "zod";
+import { log } from "./logger.js";
 import { bridge, EVALUATE_JS_TIMEOUT_MS, extensionBridgeDisconnectedMessage, isScreenshotResultPayload, jsonText, PENDING_REQUEST_TIMEOUT_MS, RateLimitError, } from "./transport.js";
+/** Stderr-only; stdout is MCP JSON-RPC. */
+function logToolCall(name, args) {
+    let payload;
+    try {
+        payload = JSON.stringify(args);
+    }
+    catch {
+        payload = String(args);
+    }
+    log(`[poke-browser-mcp] tool call: ${name}`, payload);
+}
 export function toolText(data) {
     return {
         content: [{ type: "text", text: jsonText(data) }],
@@ -8,7 +20,15 @@ export function toolText(data) {
 export function toolError(text) {
     return { isError: true, content: [{ type: "text", text }] };
 }
-async function callTool(command, payload, timeoutMs = PENDING_REQUEST_TIMEOUT_MS) {
+async function callTool(command, payload, timeoutMs = PENDING_REQUEST_TIMEOUT_MS, 
+/**
+ * MCP tool name when it differs from the bridge `command`, or `false` to skip logging
+ * (e.g. managetabs logs the full args once at the handler).
+ */
+logAs) {
+    if (logAs !== false) {
+        logToolCall(typeof logAs === "string" ? logAs : command, payload);
+    }
     if (!bridge.isReady()) {
         return toolError(extensionBridgeDisconnectedMessage());
     }
@@ -66,12 +86,20 @@ export function registerTools(mcp) {
         },
     }, async ({ text, selector, tabId, clearFirst }) => callTool("type_text", { text, selector, tabId, clearFirst }));
     mcp.registerTool("scroll_window", {
-        description: "Scroll the window or scroll a selector into view.",
+        description: "Scroll the target tab's main frame (via injected main-world script). Use selector to scroll an element into view; x/y for absolute scroll position; deltaX/deltaY for relative scroll; or direction (up/down/left/right) with optional amount (pixels, default ~85% of viewport). Precedence: selector, then absolute x/y, then direction+deltas, then deltaX/deltaY alone.",
         inputSchema: {
             x: z.number().optional().describe("Absolute scrollLeft"),
             y: z.number().optional().describe("Absolute scrollTop"),
-            deltaX: z.number().optional(),
-            deltaY: z.number().optional(),
+            deltaX: z.number().optional().describe("Horizontal scroll delta (used alone or as fallback amount with direction)"),
+            deltaY: z.number().optional().describe("Vertical scroll delta (used alone or as fallback amount with direction)"),
+            direction: z
+                .enum(["up", "down", "left", "right"])
+                .optional()
+                .describe("Scroll in this direction; combine with amount or non-zero delta on that axis"),
+            amount: z
+                .number()
+                .optional()
+                .describe("Distance in pixels when using direction (default ~85% of viewport height or width)"),
             selector: z.string().min(1).optional().describe("Element to scroll into view"),
             tabId: tabIdSchema.optional(),
             behavior: z.enum(["smooth", "instant"]).optional().describe("Scroll behavior (default instant)"),
@@ -93,6 +121,7 @@ export function registerTools(mcp) {
                 .describe("JPEG quality 0–100 (only used when format is jpeg)"),
         },
     }, async ({ tabId, format, quality }) => {
+        logToolCall("capture_screenshot", { tabId, format, quality });
         if (!bridge.isReady()) {
             return toolError(extensionBridgeDisconnectedMessage());
         }
@@ -136,6 +165,7 @@ export function registerTools(mcp) {
             quality: z.number().min(0).max(100).optional().describe("JPEG quality when format is jpeg"),
         },
     }, async ({ tabId, format, quality }) => {
+        logToolCall("full_page_capture", { tabId, format, quality });
         if (!bridge.isReady()) {
             return toolError(extensionBridgeDisconnectedMessage());
         }
@@ -194,21 +224,22 @@ export function registerTools(mcp) {
         description: "List tabs, read the active tab, open, close, or switch tabs in the connected Chrome profile.",
         inputSchema: ManageTabsSchema,
     }, async (args) => {
+        logToolCall("managetabs", args);
         if ((args.action === "close" || args.action === "switch") &&
             (args.tabId === undefined || !Number.isFinite(args.tabId))) {
             return toolError("tabId is required when action is close or switch");
         }
         switch (args.action) {
             case "list":
-                return callTool("list_tabs", {});
+                return callTool("list_tabs", {}, PENDING_REQUEST_TIMEOUT_MS, false);
             case "get_active":
-                return callTool("get_active_tab", {});
+                return callTool("get_active_tab", {}, PENDING_REQUEST_TIMEOUT_MS, false);
             case "new":
-                return callTool("new_tab", { url: args.url });
+                return callTool("new_tab", { url: args.url }, PENDING_REQUEST_TIMEOUT_MS, false);
             case "close":
-                return callTool("close_tab", { tabId: args.tabId });
+                return callTool("close_tab", { tabId: args.tabId }, PENDING_REQUEST_TIMEOUT_MS, false);
             case "switch":
-                return callTool("switch_tab", { tabId: args.tabId });
+                return callTool("switch_tab", { tabId: args.tabId }, PENDING_REQUEST_TIMEOUT_MS, false);
         }
     });
     mcp.registerTool("evaluate_js", {

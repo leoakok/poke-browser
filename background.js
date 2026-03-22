@@ -668,13 +668,100 @@ async function handleTypeText(payload) {
   return withTabMeta(tabId, dbg);
 }
 
+/**
+ * Main-world scroll implementation injected via chrome.scripting (guarantees the target tab frame).
+ * Must be self-contained — Chrome serializes this function into the page.
+ * @param {Record<string, unknown>} p
+ */
+function pokeInjectedScrollWindow(p) {
+  const behavior = p.behavior === "smooth" ? "smooth" : "auto";
+  const selector = typeof p.selector === "string" ? p.selector.trim() : "";
+
+  /**
+   * @param {string} s
+   * @returns {Element | null}
+   */
+  function querySelectorOrXPath(s) {
+    const t = s.trim();
+    if (t.startsWith("//") || t.toLowerCase().startsWith("xpath:")) {
+      const expr = t.toLowerCase().startsWith("xpath:") ? t.slice(6).trim() : t;
+      try {
+        const r = document.evaluate(expr, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        const node = r.singleNodeValue;
+        return node instanceof Element ? node : null;
+      } catch {
+        return null;
+      }
+    }
+    try {
+      return document.querySelector(t);
+    } catch {
+      return null;
+    }
+  }
+
+  const dirRaw = typeof p.direction === "string" ? p.direction.toLowerCase() : "";
+  const dir =
+    dirRaw === "up" || dirRaw === "down" || dirRaw === "left" || dirRaw === "right" ? dirRaw : "";
+
+  try {
+    if (selector) {
+      const el = querySelectorOrXPath(selector);
+      if (!el) {
+        return { success: false, scrollX: window.scrollX, scrollY: window.scrollY, error: "Element not found" };
+      }
+      el.scrollIntoView({ behavior, block: "center", inline: "nearest" });
+      return { success: true, scrollX: window.scrollX, scrollY: window.scrollY };
+    }
+
+    if (typeof p.x === "number" || typeof p.y === "number") {
+      const left = typeof p.x === "number" ? p.x : window.scrollX;
+      const top = typeof p.y === "number" ? p.y : window.scrollY;
+      window.scrollTo({ left, top, behavior });
+      return { success: true, scrollX: window.scrollX, scrollY: window.scrollY };
+    }
+
+    let dx = typeof p.deltaX === "number" && Number.isFinite(p.deltaX) ? p.deltaX : 0;
+    let dy = typeof p.deltaY === "number" && Number.isFinite(p.deltaY) ? p.deltaY : 0;
+
+    if (dir) {
+      let amt = typeof p.amount === "number" && Number.isFinite(p.amount) ? Math.abs(p.amount) : NaN;
+      if (!Number.isFinite(amt) || amt === 0) {
+        if (dir === "up" || dir === "down") {
+          const fromDelta = typeof p.deltaY === "number" && Number.isFinite(p.deltaY) && p.deltaY !== 0;
+          amt = fromDelta ? Math.abs(p.deltaY) : Math.max(200, Math.floor(window.innerHeight * 0.85));
+        } else {
+          const fromDelta = typeof p.deltaX === "number" && Number.isFinite(p.deltaX) && p.deltaX !== 0;
+          amt = fromDelta ? Math.abs(p.deltaX) : Math.max(200, Math.floor(window.innerWidth * 0.85));
+        }
+      }
+      dx = dir === "left" ? -amt : dir === "right" ? amt : 0;
+      dy = dir === "up" ? -amt : dir === "down" ? amt : 0;
+    }
+
+    window.scrollBy({ left: dx, top: dy, behavior });
+    return { success: true, scrollX: window.scrollX, scrollY: window.scrollY };
+  } catch (err) {
+    return { success: false, scrollX: window.scrollX, scrollY: window.scrollY, error: String(err) };
+  }
+}
+
 /** @param {unknown} payload */
 async function handleScrollWindow(payload) {
   const p = asPayload(payload);
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
-  const res = await chrome.tabs.sendMessage(tabId, { type: "POKE_SCROLL_WINDOW", payload: p }).catch((e) => {
-    throw new Error(`scroll_window relay failed: ${String(e)}`);
+  /** Prefer scripting.executeScript so scroll runs in the tab's main frame (not extension/offscreen contexts). */
+  const results = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: false },
+    world: "MAIN",
+    injectImmediately: true,
+    func: pokeInjectedScrollWindow,
+    args: [p],
   });
+  const res = /** @type {unknown} */ (results[0]?.result);
+  if (res === undefined) {
+    throw new Error("scroll_window: no result from executeScript (tab may be restricted or unavailable)");
+  }
   return withTabMeta(tabId, res);
 }
 

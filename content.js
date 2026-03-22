@@ -249,6 +249,9 @@ function handleScrollWindow(message, sendResponse) {
   const p = m.payload && typeof m.payload === "object" ? m.payload : {};
   const behavior = p.behavior === "smooth" ? "smooth" : "auto";
   const selector = typeof p.selector === "string" ? p.selector.trim() : "";
+  const dirRaw = typeof p.direction === "string" ? p.direction.toLowerCase() : "";
+  const dir =
+    dirRaw === "up" || dirRaw === "down" || dirRaw === "left" || dirRaw === "right" ? dirRaw : "";
 
   try {
     if (selector) {
@@ -263,8 +266,22 @@ function handleScrollWindow(message, sendResponse) {
       const top = typeof p.y === "number" ? p.y : window.scrollY;
       window.scrollTo({ left, top, behavior });
     } else {
-      const dx = typeof p.deltaX === "number" ? p.deltaX : 0;
-      const dy = typeof p.deltaY === "number" ? p.deltaY : 0;
+      let dx = typeof p.deltaX === "number" && Number.isFinite(p.deltaX) ? p.deltaX : 0;
+      let dy = typeof p.deltaY === "number" && Number.isFinite(p.deltaY) ? p.deltaY : 0;
+      if (dir) {
+        let amt = typeof p.amount === "number" && Number.isFinite(p.amount) ? Math.abs(p.amount) : NaN;
+        if (!Number.isFinite(amt) || amt === 0) {
+          if (dir === "up" || dir === "down") {
+            const fromDelta = typeof p.deltaY === "number" && Number.isFinite(p.deltaY) && p.deltaY !== 0;
+            amt = fromDelta ? Math.abs(p.deltaY) : Math.max(200, Math.floor(window.innerHeight * 0.85));
+          } else {
+            const fromDelta = typeof p.deltaX === "number" && Number.isFinite(p.deltaX) && p.deltaX !== 0;
+            amt = fromDelta ? Math.abs(p.deltaX) : Math.max(200, Math.floor(window.innerWidth * 0.85));
+          }
+        }
+        dx = dir === "left" ? -amt : dir === "right" ? amt : 0;
+        dy = dir === "up" ? -amt : dir === "down" ? amt : 0;
+      }
       window.scrollBy({ left: dx, top: dy, behavior });
     }
     sendResponse({ success: true, scrollX: window.scrollX, scrollY: window.scrollY });

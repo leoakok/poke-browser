@@ -128,12 +128,21 @@ export function registerTools(mcp: McpServer): void {
   mcp.registerTool(
     "scroll_window",
     {
-      description: "Scroll the window or scroll a selector into view.",
+      description:
+        "Scroll the target tab's main frame (via injected main-world script). Use selector to scroll an element into view; x/y for absolute scroll position; deltaX/deltaY for relative scroll; or direction (up/down/left/right) with optional amount (pixels, default ~85% of viewport). Precedence: selector, then absolute x/y, then direction+deltas, then deltaX/deltaY alone.",
       inputSchema: {
         x: z.number().optional().describe("Absolute scrollLeft"),
         y: z.number().optional().describe("Absolute scrollTop"),
-        deltaX: z.number().optional(),
-        deltaY: z.number().optional(),
+        deltaX: z.number().optional().describe("Horizontal scroll delta (used alone or as fallback amount with direction)"),
+        deltaY: z.number().optional().describe("Vertical scroll delta (used alone or as fallback amount with direction)"),
+        direction: z
+          .enum(["up", "down", "left", "right"])
+          .optional()
+          .describe("Scroll in this direction; combine with amount or non-zero delta on that axis"),
+        amount: z
+          .number()
+          .optional()
+          .describe("Distance in pixels when using direction (default ~85% of viewport height or width)"),
         selector: z.string().min(1).optional().describe("Element to scroll into view"),
         tabId: tabIdSchema.optional(),
         behavior: z.enum(["smooth", "instant"]).optional().describe("Scroll behavior (default instant)"),
