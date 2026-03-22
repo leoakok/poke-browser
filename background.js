@@ -60,9 +60,8 @@ async function ensureOffscreenDocument() {
   if (has) return;
   await chrome.offscreen.createDocument({
     url: chrome.runtime.getURL("offscreen.html"),
-    reasons: ["WEBSOCKET"],
-    justification:
-      "Maintain a persistent WebSocket to the poke-browser MCP server; MV3 service workers cannot hold long-lived sockets.",
+    reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
+    justification: "Maintain persistent WebSocket connection to poke-browser MCP server for browser automation",
   });
 }
 
