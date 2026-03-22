@@ -544,6 +544,59 @@ async function typeTextViaDebugger(tabId, text) {
 }
 
 /**
+ * Temporary viewport dot for coordinate-based tools. Serialized into the page by chrome.scripting.
+ * @param {{ x?: unknown; y?: unknown }} p
+ */
+function pokeInjectedCursorFeedbackDot(p) {
+  const x = typeof p.x === "number" ? p.x : Number(p.x);
+  const y = typeof p.y === "number" ? p.y : Number(p.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+
+  const dot = document.createElement("div");
+  dot.setAttribute("data-poke-cursor-feedback", "1");
+  Object.assign(dot.style, {
+    position: "fixed",
+    left: `${x - 8}px`,
+    top: `${y - 8}px`,
+    width: "16px",
+    height: "16px",
+    borderRadius: "50%",
+    background: "rgb(255, 0, 0)",
+    zIndex: "999999",
+    pointerEvents: "none",
+    opacity: "1",
+    transition: "opacity 600ms ease-out",
+    boxSizing: "border-box",
+  });
+  (document.documentElement || document.body).appendChild(dot);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      dot.style.opacity = "0";
+    });
+  });
+  setTimeout(() => dot.remove(), 650);
+}
+
+/**
+ * @param {number} tabId
+ * @param {number} x
+ * @param {number} y
+ */
+async function showCursorFeedbackDot(tabId, x, y) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      world: "MAIN",
+      injectImmediately: true,
+      func: pokeInjectedCursorFeedbackDot,
+      args: [{ x, y }],
+    });
+  } catch {
+    /* chrome:// and other restricted tabs — automation continues */
+  }
+}
+
+/**
  * @param {number} tabId
  * @param {number} timeoutMs
  */
@@ -635,6 +688,7 @@ async function handleClickElement(payload) {
     return withTabMeta(tabId, res);
   }
   if (hasXY) {
+    await showCursorFeedbackDot(tabId, x, y);
     const r = await clickViaDebugger(tabId, x, y);
     return withTabMeta(tabId, r);
   }
@@ -648,6 +702,10 @@ async function handleTypeText(payload) {
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
   const selector = typeof p.selector === "string" ? p.selector : undefined;
   const clearFirst = p.clearFirst === true;
+  const tx = typeof p.x === "number" ? p.x : Number(p.x);
+  const ty = typeof p.y === "number" ? p.y : Number(p.y);
+  const hasXY = Number.isFinite(tx) && Number.isFinite(ty);
+  if (hasXY) await showCursorFeedbackDot(tabId, tx, ty);
 
   const res = await chrome.tabs
     .sendMessage(tabId, {
@@ -1591,6 +1649,7 @@ async function handleHoverElement(payload) {
     return withTabMeta(tabId, res);
   }
   if (hasXY) {
+    await showCursorFeedbackDot(tabId, x, y);
     await debuggerAttachForTool(tabId);
     try {
       await debuggerSend(tabId, "Input.dispatchMouseEvent", {

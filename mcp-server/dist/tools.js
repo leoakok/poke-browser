@@ -203,10 +203,12 @@ export function registerTools(mcp) {
         inputSchema: {
             text: z.string().describe("Text to type"),
             selector: z.string().min(1).optional(),
+            x: z.number().optional().describe("Optional viewport X — shows brief cursor feedback dot in the tab"),
+            y: z.number().optional().describe("Optional viewport Y — shows brief cursor feedback dot in the tab"),
             tabId: tabIdSchema.optional(),
             clearFirst: z.boolean().optional().describe("Select-all and replace field contents first"),
         },
-    }, async ({ text, selector, tabId, clearFirst }) => callTool("type_text", { text, selector, tabId, clearFirst }));
+    }, async ({ text, selector, x, y, tabId, clearFirst }) => callTool("type_text", { text, selector, x, y, tabId, clearFirst }));
     mcp.registerTool("scroll_window", {
         description: "Scroll the target tab's main frame (via injected main-world script). Use selector to scroll an element into view; x/y for absolute scroll position; deltaX/deltaY for relative scroll; or direction (up/down/left/right) with optional amount (pixels, default ~85% of viewport). Precedence: selector, then absolute x/y, then direction+deltas, then deltaX/deltaY alone.",
         inputSchema: {

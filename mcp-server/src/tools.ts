@@ -250,12 +250,14 @@ export function registerTools(mcp: McpServer): void {
       inputSchema: {
         text: z.string().describe("Text to type"),
         selector: z.string().min(1).optional(),
+        x: z.number().optional().describe("Optional viewport X — shows brief cursor feedback dot in the tab"),
+        y: z.number().optional().describe("Optional viewport Y — shows brief cursor feedback dot in the tab"),
         tabId: tabIdSchema.optional(),
         clearFirst: z.boolean().optional().describe("Select-all and replace field contents first"),
       },
     },
-    async ({ text, selector, tabId, clearFirst }) =>
-      callTool("type_text", { text, selector, tabId, clearFirst })
+    async ({ text, selector, x, y, tabId, clearFirst }) =>
+      callTool("type_text", { text, selector, x, y, tabId, clearFirst })
   );
 
   mcp.registerTool(
