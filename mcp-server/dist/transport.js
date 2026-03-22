@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { WebSocketServer, WebSocket } from "ws";
+const WS_PING_INTERVAL_MS = 20_000;
+const WS_PONG_DEADLINE_MS = 30_000;
+/** Strong ref so the server is never GC'd; also useful for tests. */
+export let extensionWebSocketServer = null;
 export const DEFAULT_PORT = 9009;
 export const PENDING_REQUEST_TIMEOUT_MS = 10_000;
 export const EVALUATE_JS_TIMEOUT_MS = 60_000;
@@ -107,11 +112,15 @@ export class ExtensionBridge {
     }
 }
 export const bridge = new ExtensionBridge();
-export function startExtensionWebSocketServer(port, b) {
+/**
+ * Binds the extension WebSocket server and resolves only after the port is listening
+ * (avoids ERR_CONNECTION_REFUSED races with early client connects).
+ */
+export async function startExtensionWebSocketServer(port, b) {
     const wss = new WebSocketServer({ port, host: "127.0.0.1" });
-    wss.on("listening", () => {
-        console.error(`[poke-browser-mcp] WebSocket listening on ws://127.0.0.1:${port}`);
-        console.error("[poke-browser-mcp] Load the poke-browser extension and keep this process running.");
+    const trackedClients = new Set();
+    wss.on("error", (err) => {
+        console.error("[poke-browser-mcp] WebSocket server error:", err);
     });
     wss.on("connection", (ws) => {
         for (const client of wss.clients) {
@@ -124,21 +133,59 @@ export function startExtensionWebSocketServer(port, b) {
                 }
             }
         }
+        trackedClients.add(ws);
         b.attachSocket(ws);
         console.error("[poke-browser-mcp] Extension WebSocket client connected");
+        let pongDeadline = null;
+        const clearPongDeadline = () => {
+            if (pongDeadline) {
+                clearTimeout(pongDeadline);
+                pongDeadline = null;
+            }
+        };
+        const pingInterval = setInterval(() => {
+            if (ws.readyState !== WebSocket.OPEN)
+                return;
+            clearPongDeadline();
+            pongDeadline = setTimeout(() => {
+                console.error("[poke-browser-mcp] WebSocket client missed pong deadline; terminating client");
+                try {
+                    ws.terminate();
+                }
+                catch {
+                    /* ignore */
+                }
+            }, WS_PONG_DEADLINE_MS);
+            try {
+                ws.ping();
+            }
+            catch {
+                /* ignore */
+            }
+        }, WS_PING_INTERVAL_MS);
+        ws.on("pong", () => {
+            clearPongDeadline();
+        });
         ws.on("message", (data) => {
             const raw = typeof data === "string" ? data : Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
             b.handleMessage(raw);
         });
         ws.on("close", () => {
+            clearInterval(pingInterval);
+            clearPongDeadline();
+            trackedClients.delete(ws);
             b.clearSocket(ws);
             b.rejectAllPending("Chrome extension WebSocket disconnected");
             console.error("[poke-browser-mcp] Extension WebSocket client disconnected");
         });
         ws.on("error", (err) => {
-            console.error("[poke-browser-mcp] WebSocket error:", err.message);
+            console.error("[poke-browser-mcp] WebSocket socket error:", err.message);
         });
     });
+    await once(wss, "listening");
+    extensionWebSocketServer = wss;
+    console.error(`[poke-browser-mcp] WebSocket listening on ws://127.0.0.1:${port}`);
+    console.error("[poke-browser-mcp] Load the poke-browser extension and keep this process running.");
     return wss;
 }
 //# sourceMappingURL=transport.js.map

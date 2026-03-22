@@ -1,4 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
+/** Strong ref so the server is never GC'd; also useful for tests. */
+export declare let extensionWebSocketServer: WebSocketServer | null;
 export declare const DEFAULT_PORT = 9009;
 export declare const PENDING_REQUEST_TIMEOUT_MS = 10000;
 export declare const EVALUATE_JS_TIMEOUT_MS = 60000;
@@ -29,5 +31,9 @@ export declare class ExtensionBridge {
     request(command: ExtensionCommand, payload: unknown, timeoutMs: number): Promise<unknown>;
 }
 export declare const bridge: ExtensionBridge;
-export declare function startExtensionWebSocketServer(port: number, b: ExtensionBridge): WebSocketServer;
+/**
+ * Binds the extension WebSocket server and resolves only after the port is listening
+ * (avoids ERR_CONNECTION_REFUSED races with early client connects).
+ */
+export declare function startExtensionWebSocketServer(port: number, b: ExtensionBridge): Promise<WebSocketServer>;
 //# sourceMappingURL=transport.d.ts.map

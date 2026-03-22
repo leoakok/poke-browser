@@ -2,8 +2,9 @@
 
 const DEFAULT_WS_PORT = 9009;
 const LOG_MAX = 50;
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 60000;
+const WS_INITIAL_RETRY_MS = 1000;
+const WS_MAX_RETRY_MS = 30000;
+const WS_MAX_RETRIES = 20;
 const NAVIGATE_WAIT_MS = 30_000;
 const MAX_NET_PER_TAB = 200;
 
@@ -18,9 +19,15 @@ const networkStateByTab = new Map();
 
 /** @type {WebSocket | null} */
 let socket = null;
+/** When true, the next `close` event does not schedule a reconnect (port change / manual reconnect). */
+let suppressReconnectOnce = false;
+
 /** @type {ReturnType<typeof setTimeout> | null} */
 let reconnectTimer = null;
-let reconnectAttempt = 0;
+/** Next delay (ms) after a connection close (doubles, capped); reset on successful open. */
+let wsRetryDelayMs = WS_INITIAL_RETRY_MS;
+/** Scheduled reconnects after close without a successful open in between; reset on open. */
+let wsReconnectCycles = 0;
 /** @type {"disconnected" | "connecting" | "connected"} */
 let mcpStatus = "disconnected";
 
@@ -46,14 +53,35 @@ function setStatus(next) {
   chrome.runtime.sendMessage({ type: "POKE_STATUS", status: next }).catch(() => {});
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  const delay = Math.min(RECONNECT_BASE_MS * 2 ** reconnectAttempt, RECONNECT_MAX_MS);
-  reconnectAttempt += 1;
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
+
+function scheduleReconnectAfterClose() {
+  clearReconnectTimer();
+  if (wsReconnectCycles >= WS_MAX_RETRIES) {
+    console.error("poke-browser: max WebSocket reconnect attempts reached; not retrying further");
+    logCommand("out", `WebSocket: gave up after ${WS_MAX_RETRIES} failed reconnects`);
+    setStatus("disconnected");
+    return;
+  }
+  const delay = wsRetryDelayMs;
+  wsRetryDelayMs = Math.min(wsRetryDelayMs * 2, WS_MAX_RETRY_MS);
+  wsReconnectCycles += 1;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connectWebSocket();
   }, delay);
+  logCommand("out", `WebSocket: reconnect in ${delay}ms (${wsReconnectCycles}/${WS_MAX_RETRIES})`);
+}
+
+function resetWebSocketBackoff() {
+  clearReconnectTimer();
+  wsRetryDelayMs = WS_INITIAL_RETRY_MS;
+  wsReconnectCycles = 0;
 }
 
 function connectWebSocket() {
@@ -69,12 +97,12 @@ function connectWebSocket() {
     } catch (e) {
       setStatus("disconnected");
       logCommand("out", `WebSocket construct failed: ${String(e)}`);
-      scheduleReconnect();
+      scheduleReconnectAfterClose();
       return;
     }
 
     socket.addEventListener("open", () => {
-      reconnectAttempt = 0;
+      resetWebSocketBackoff();
       setStatus("connected");
       logCommand("out", `Connected to MCP WebSocket ${url}`);
       try {
@@ -100,11 +128,15 @@ function connectWebSocket() {
       setStatus("disconnected");
       logCommand("out", "WebSocket closed");
       socket = null;
-      scheduleReconnect();
+      if (suppressReconnectOnce) {
+        suppressReconnectOnce = false;
+        return;
+      }
+      scheduleReconnectAfterClose();
     });
 
     socket.addEventListener("error", () => {
-      logCommand("out", "WebSocket error");
+      logCommand("out", "WebSocket error (see close for reconnect)");
     });
   });
 }
@@ -1232,27 +1264,29 @@ const RUNTIME_HANDLERS = {
       return false;
     }
     void chrome.storage.local.set({ wsPort: next }).then(() => {
+      resetWebSocketBackoff();
       if (socket) {
+        suppressReconnectOnce = true;
         try {
           socket.close();
         } catch (_) {
-          /* ignore */
+          suppressReconnectOnce = false;
         }
         socket = null;
       }
-      reconnectAttempt = 0;
       connectWebSocket();
       sendResponse({ ok: true, port: next });
     });
     return true;
   },
   POKE_RECONNECT: (_message, sendResponse) => {
-    reconnectAttempt = 0;
+    resetWebSocketBackoff();
     if (socket) {
+      suppressReconnectOnce = true;
       try {
         socket.close();
       } catch (_) {
-        /* ignore */
+        suppressReconnectOnce = false;
       }
       socket = null;
     }

@@ -8,6 +8,19 @@ import { createPokeBrowserMcpServer } from "./server.js";
 
 const DEFAULT_MCP_HTTP_PORT = 8755;
 
+let processGuardsInstalled = false;
+
+function installProcessGuards(): void {
+  if (processGuardsInstalled) return;
+  processGuardsInstalled = true;
+  process.on("uncaughtException", (err) => {
+    console.error("[poke-browser-mcp] uncaughtException:", err);
+  });
+  process.on("unhandledRejection", (reason) => {
+    console.error("[poke-browser-mcp] unhandledRejection:", reason);
+  });
+}
+
 export type RunMode = "stdio" | "http" | "http-tunnel";
 
 function readMcpHttpPortFromEnv(): number {
@@ -54,7 +67,7 @@ export function parseArgs(argv: string[]): {
 
 async function runStdio(): Promise<void> {
   const WS_PORT = readPort();
-  startExtensionWebSocketServer(WS_PORT, bridge);
+  await startExtensionWebSocketServer(WS_PORT, bridge);
 
   const mcp = createPokeBrowserMcpServer();
   const transport = new StdioServerTransport();
@@ -69,7 +82,7 @@ async function runHttp(opts: {
   spawnTunnel: boolean;
 }): Promise<void> {
   const WS_PORT = readPort();
-  startExtensionWebSocketServer(WS_PORT, bridge);
+  await startExtensionWebSocketServer(WS_PORT, bridge);
 
   const app = createMcpExpressApp();
 
@@ -158,6 +171,7 @@ async function runHttp(opts: {
 }
 
 export async function main(): Promise<void> {
+  installProcessGuards();
   const { mode, mcpHttpPort } = parseArgs(process.argv.slice(2));
 
   if (mode === "stdio") {

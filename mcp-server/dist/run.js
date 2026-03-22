@@ -5,6 +5,18 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import { bridge, readPort, startExtensionWebSocketServer } from "./transport.js";
 import { createPokeBrowserMcpServer } from "./server.js";
 const DEFAULT_MCP_HTTP_PORT = 8755;
+let processGuardsInstalled = false;
+function installProcessGuards() {
+    if (processGuardsInstalled)
+        return;
+    processGuardsInstalled = true;
+    process.on("uncaughtException", (err) => {
+        console.error("[poke-browser-mcp] uncaughtException:", err);
+    });
+    process.on("unhandledRejection", (reason) => {
+        console.error("[poke-browser-mcp] unhandledRejection:", reason);
+    });
+}
 function readMcpHttpPortFromEnv() {
     const raw = process.env.POKE_BROWSER_MCP_PORT ??
         process.env.POKE_BROWSER_PORT ??
@@ -35,7 +47,7 @@ export function parseArgs(argv) {
 }
 async function runStdio() {
     const WS_PORT = readPort();
-    startExtensionWebSocketServer(WS_PORT, bridge);
+    await startExtensionWebSocketServer(WS_PORT, bridge);
     const mcp = createPokeBrowserMcpServer();
     const transport = new StdioServerTransport();
     await mcp.connect(transport);
@@ -43,7 +55,7 @@ async function runStdio() {
 }
 async function runHttp(opts) {
     const WS_PORT = readPort();
-    startExtensionWebSocketServer(WS_PORT, bridge);
+    await startExtensionWebSocketServer(WS_PORT, bridge);
     const app = createMcpExpressApp();
     app.post("/mcp", async (req, res) => {
         const mcp = createPokeBrowserMcpServer();
@@ -112,6 +124,7 @@ async function runHttp(opts) {
     }
 }
 export async function main() {
+    installProcessGuards();
     const { mode, mcpHttpPort } = parseArgs(process.argv.slice(2));
     if (mode === "stdio") {
         await runStdio();
