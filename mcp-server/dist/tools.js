@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { bridge, EVALUATE_JS_TIMEOUT_MS, isScreenshotResultPayload, jsonText, PENDING_REQUEST_TIMEOUT_MS, RateLimitError, } from "./transport.js";
+import { bridge, EVALUATE_JS_TIMEOUT_MS, extensionBridgeDisconnectedMessage, isScreenshotResultPayload, jsonText, PENDING_REQUEST_TIMEOUT_MS, RateLimitError, } from "./transport.js";
 export function toolText(data) {
     return {
         content: [{ type: "text", text: jsonText(data) }],
@@ -10,7 +10,7 @@ export function toolError(text) {
 }
 async function callTool(command, payload, timeoutMs = PENDING_REQUEST_TIMEOUT_MS) {
     if (!bridge.isReady()) {
-        return toolError("Chrome extension is not connected. Load poke-browser in Chrome and ensure the WebSocket port matches POKE_BROWSER_WS_PORT.");
+        return toolError(extensionBridgeDisconnectedMessage());
     }
     try {
         const result = await bridge.request(command, payload, timeoutMs);
@@ -104,7 +104,7 @@ export function registerTools(mcp) {
         },
     }, async ({ tabId, format, quality }) => {
         if (!bridge.isReady()) {
-            return toolError("Chrome extension is not connected. Load poke-browser in Chrome and ensure the WebSocket port matches POKE_BROWSER_WS_PORT.");
+            return toolError(extensionBridgeDisconnectedMessage());
         }
         try {
             const result = await bridge.request("screenshot", { tabId, format: format ?? "png", quality }, PENDING_REQUEST_TIMEOUT_MS);
@@ -137,7 +137,7 @@ export function registerTools(mcp) {
         },
     }, async ({ tabId, format, quality }) => {
         if (!bridge.isReady()) {
-            return toolError("Chrome extension is not connected. Load poke-browser in Chrome and ensure the WebSocket port matches POKE_BROWSER_WS_PORT.");
+            return toolError(extensionBridgeDisconnectedMessage());
         }
         try {
             const result = await bridge.request("full_page_capture", { tabId, format: format ?? "png", quality }, 120_000);

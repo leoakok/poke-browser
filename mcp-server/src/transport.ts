@@ -82,6 +82,11 @@ export class RateLimitError extends Error {
   }
 }
 
+/**
+ * WebSocket listen port for the Chrome extension (default 9009).
+ * Uses `POKE_BROWSER_WS_PORT` or `WS_PORT`. Note: `POKE_BROWSER_PORT` in `run.ts` is the MCP HTTP
+ * port, not this value; the extension stores its target port in chrome.storage (`wsPort`).
+ */
 export function readPort(): number {
   const raw = process.env.POKE_BROWSER_WS_PORT ?? process.env.WS_PORT;
   if (raw === undefined || raw === "") return DEFAULT_PORT;
@@ -91,6 +96,12 @@ export function readPort(): number {
     return DEFAULT_PORT;
   }
   return Math.trunc(n);
+}
+
+/** Shown when tools run but no extension has completed the WebSocket `hello` handshake yet. */
+export function extensionBridgeDisconnectedMessage(): string {
+  const port = readPort();
+  return `No Chrome extension connected. Load the poke-browser extension in Chrome first; it auto-connects to ws://127.0.0.1:${port}. If you use a custom port, set POKE_BROWSER_WS_PORT when starting this server and set the same WS port in the extension popup.`;
 }
 
 export function isRecord(v: unknown): v is Record<string, unknown> {
@@ -167,7 +178,7 @@ export class ExtensionBridge {
   request(command: ExtensionCommand, payload: unknown, timeoutMs: number): Promise<unknown> {
     const sock = this.socket;
     if (!sock || sock.readyState !== 1) {
-      return Promise.reject(new Error("Chrome extension is not connected to the MCP WebSocket server"));
+      return Promise.reject(new Error(extensionBridgeDisconnectedMessage()));
     }
 
     const now = Date.now();

@@ -25,7 +25,14 @@ export declare class RateLimitError extends Error {
     readonly retryAfter = 10;
     constructor();
 }
+/**
+ * WebSocket listen port for the Chrome extension (default 9009).
+ * Uses `POKE_BROWSER_WS_PORT` or `WS_PORT`. Note: `POKE_BROWSER_PORT` in `run.ts` is the MCP HTTP
+ * port, not this value; the extension stores its target port in chrome.storage (`wsPort`).
+ */
 export declare function readPort(): number;
+/** Shown when tools run but no extension has completed the WebSocket `hello` handshake yet. */
+export declare function extensionBridgeDisconnectedMessage(): string;
 export declare function isRecord(v: unknown): v is Record<string, unknown>;
 export declare function isScreenshotResultPayload(v: unknown): v is ScreenshotResultPayload;
 export declare function jsonText(data: unknown): string;

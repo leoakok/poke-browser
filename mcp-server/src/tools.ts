@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   bridge,
   EVALUATE_JS_TIMEOUT_MS,
+  extensionBridgeDisconnectedMessage,
   isScreenshotResultPayload,
   jsonText,
   PENDING_REQUEST_TIMEOUT_MS,
@@ -27,9 +28,7 @@ async function callTool(
   timeoutMs: number = PENDING_REQUEST_TIMEOUT_MS
 ): Promise<CallToolResult> {
   if (!bridge.isReady()) {
-    return toolError(
-      "Chrome extension is not connected. Load poke-browser in Chrome and ensure the WebSocket port matches POKE_BROWSER_WS_PORT."
-    );
+    return toolError(extensionBridgeDisconnectedMessage());
   }
   try {
     const result = await bridge.request(command, payload, timeoutMs);
@@ -153,9 +152,7 @@ export function registerTools(mcp: McpServer): void {
     },
     async ({ tabId, format, quality }): Promise<CallToolResult> => {
       if (!bridge.isReady()) {
-        return toolError(
-          "Chrome extension is not connected. Load poke-browser in Chrome and ensure the WebSocket port matches POKE_BROWSER_WS_PORT."
-        );
+        return toolError(extensionBridgeDisconnectedMessage());
       }
       try {
         const result = await bridge.request(
@@ -197,9 +194,7 @@ export function registerTools(mcp: McpServer): void {
     },
     async ({ tabId, format, quality }): Promise<CallToolResult> => {
       if (!bridge.isReady()) {
-        return toolError(
-          "Chrome extension is not connected. Load poke-browser in Chrome and ensure the WebSocket port matches POKE_BROWSER_WS_PORT.",
-        );
+        return toolError(extensionBridgeDisconnectedMessage());
       }
       try {
         const result = await bridge.request(
