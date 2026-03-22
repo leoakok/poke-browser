@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { PassThrough } from "node:stream";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -112,7 +112,26 @@ export function parseArgs(argv) {
     }
     return { mode: "stdio", mcpHttpPort: readMcpHttpPortFromEnv() };
 }
+/** Read-only: if something is already listening on `port`, warn (never kills). */
+function maybeReportExistingListenerOnPort(port) {
+    if (process.platform === "win32")
+        return;
+    try {
+        const out = execFileSync("lsof", ["-i", `:${port}`, "-sTCP:LISTEN"], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+            maxBuffer: 64_000,
+        });
+        if (out.trim().length > 0) {
+            log(`[poke-browser] Port ${port} already has a TCP listener (run: lsof -i :${port}). This process will still try to bind; if it fails, set POKE_BROWSER_WS_PORT or stop the other process.`);
+        }
+    }
+    catch {
+        /* lsof unavailable or no matching listeners */
+    }
+}
 function logAndStartExtensionWebSocket(port) {
+    maybeReportExistingListenerOnPort(port);
     const authToken = readOptionalWebSocketAuthToken();
     if (authToken !== undefined) {
         console.error(`[poke-browser-mcp] WebSocket auth enabled (POKE_BROWSER_TOKEN): ${authToken}`);
@@ -154,6 +173,8 @@ async function runStdio() {
     stdioMcpConnected = true;
     installShutdownHandlers();
     console.error("[poke-browser-mcp] MCP stdio transport connected (ready for MCP clients)");
+    log("[poke-browser] MCP stdio transport ready");
+    log("[poke-browser] Ready. Load the Chrome extension and connect your MCP client.");
 }
 async function runHttp(opts) {
     const WS_PORT = readPort();
@@ -209,11 +230,45 @@ async function runHttp(opts) {
     const url = `http://127.0.0.1:${port}/mcp`;
     console.error(`[poke-browser-mcp] MCP (HTTP) → ${url}`);
     console.error(`[poke-browser-mcp] Extension WebSocket → ws://127.0.0.1:${WS_PORT}`);
-    console.error(`[poke-browser-mcp] Poke: npx --yes poke@latest tunnel ${url} -n "poke-browser"`);
+    log(`[poke-browser] MCP HTTP transport ready at ${url}`);
+    const pokeTunnelLabel = process.env.POKE_BROWSER_TUNNEL_NAME?.trim() || "poke-browser";
     if (opts.spawnTunnel) {
+        const apiKey = (process.env.POKE_API_KEY ?? "").trim();
+        if (!apiKey) {
+            log("[poke-browser] No POKE_API_KEY set - running without tunnel (local only)");
+            console.error(`[poke-browser-mcp] Poke (local): npx --yes poke@latest tunnel ${url} -n "${pokeTunnelLabel}"`);
+            log("[poke-browser] Ready. Load the Chrome extension and connect your MCP client.");
+            return;
+        }
         console.error("[poke-browser-mcp] Tunnel output from Poke follows.");
         console.error("");
-        const tunnel = spawn("npx", ["--yes", "poke@latest", "tunnel", url, "-n", "poke-browser"], { stdio: "inherit", env: process.env });
+        let tunnelErrBuf = "";
+        let tunnelUrlReported = false;
+        const reportTunnelUrlFromBuffer = () => {
+            if (tunnelUrlReported)
+                return;
+            const m = tunnelErrBuf.match(/https:\/\/[^\s"'<>]+\/mcp\b/);
+            if (m) {
+                tunnelUrlReported = true;
+                log(`[poke-browser] Tunnel: ${m[0]}`);
+            }
+        };
+        const tunnel = spawn("npx", [
+            "--yes",
+            "poke@latest",
+            "tunnel",
+            url,
+            "-n",
+            pokeTunnelLabel,
+        ], { stdio: ["inherit", "inherit", "pipe"], env: process.env });
+        tunnel.stderr?.on("data", (chunk) => {
+            process.stderr.write(chunk);
+            tunnelErrBuf += chunk.toString("utf8");
+            if (tunnelErrBuf.length > 24_000) {
+                tunnelErrBuf = tunnelErrBuf.slice(-24_000);
+            }
+            reportTunnelUrlFromBuffer();
+        });
         tunnel.on("error", (err) => {
             console.error(`[poke-browser-mcp] Could not start the Poke tunnel: ${err.message}`);
             if (err.code === "ENOENT") {
@@ -225,6 +280,16 @@ async function runHttp(opts) {
             process.exit(code ?? 0);
         });
         tunnelChild = tunnel;
+        setTimeout(() => {
+            if (!tunnelUrlReported) {
+                log("[poke-browser] Tunnel: (public URL is printed by the Poke CLI above — ends with /mcp)");
+            }
+            log("[poke-browser] Ready. Load the Chrome extension and connect your MCP client.");
+        }, 2500);
+    }
+    else {
+        console.error(`[poke-browser-mcp] Poke: npx --yes poke@latest tunnel ${url} -n "${pokeTunnelLabel}"`);
+        log("[poke-browser] Ready. Load the Chrome extension and connect your MCP client.");
     }
 }
 export async function main() {

@@ -16,11 +16,13 @@
   ],
   "scripts": {
     "build": "tsc",
-    "start": "node ./cli.mjs",
+    "start": "node dist/index.js",
+    "start:tunnel": "node cli.mjs",
+    "dev": "npx tsx src/index.ts",
     "prepublishOnly": "npm run build",
     "serve": "node ./dist/index.js",
     "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
-    "inspector:dev": "npx @modelcontextprotocol/inspector npx tsx src/index.ts",
+    "inspector:dev": "npx @modelcontextprotocol/inspector node cli.mjs",
     "test": "vitest run tests/",
     "test:watch": "vitest tests/"
   },

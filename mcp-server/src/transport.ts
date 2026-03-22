@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
+import { log } from "./logger.js";
 
 const WS_PING_INTERVAL_MS = 20_000;
 const WS_PONG_DEADLINE_MS = 30_000;
@@ -256,7 +257,15 @@ export async function startExtensionWebSocketServer(
   const wss = new WebSocketServer({ port, host: "127.0.0.1" });
   const trackedClients = new Set<WebSocket>();
 
-  wss.on("error", (err: Error) => {
+  wss.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      log(`[poke-browser] Port ${port} is already in use.`);
+      log(`[poke-browser] To free it: lsof -ti :${port} | xargs kill -9`);
+      log(
+        `[poke-browser] Or set POKE_BROWSER_WS_PORT=<other-port> to use a different WebSocket port.`,
+      );
+      process.exit(1);
+    }
     console.error("[poke-browser-mcp] WebSocket server error:", err);
   });
 
