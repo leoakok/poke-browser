@@ -26,6 +26,9 @@ let mcpStatus = "disconnected";
 
 const KEEPALIVE_ALARM = "keepAlive";
 
+/** In-flight offscreen creation; assigned synchronously when the inner async IIFE hits its first `await`. */
+let offscreenCreatingPromise = null;
+
 /** @type {Array<{ ts: number, direction: "in" | "out", summary: string }>} */
 let commandLog = [];
 
@@ -65,17 +68,62 @@ function setStatus(next) {
   }
 }
 
-async function ensureOffscreenDocument() {
-  const has = await chrome.offscreen.hasDocument();
-  if (has) return;
-  const wsPort = await getWsPort();
-  const docUrl = new URL(chrome.runtime.getURL("offscreen.html"));
-  docUrl.searchParams.set("port", String(wsPort));
-  await chrome.offscreen.createDocument({
-    url: docUrl.href,
-    reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
-    justification: "Maintain persistent WebSocket connection to poke-browser MCP server for browser automation",
-  });
+/**
+ * Idempotent offscreen creation: concurrent onInstalled / onStartup / alarm / SW wake all await the same work.
+ */
+async function setupOffscreen() {
+  if (offscreenCreatingPromise) {
+    return offscreenCreatingPromise;
+  }
+
+  offscreenCreatingPromise = (async () => {
+    try {
+      try {
+        if (await chrome.offscreen.hasDocument()) {
+          return;
+        }
+      } catch (e) {
+        console.error("[poke-browser ext] hasDocument check failed:", e);
+      }
+
+      const stored = await chrome.storage.local.get("wsPort");
+      const raw = stored.wsPort;
+      const port =
+        typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw < 65536
+          ? Math.trunc(raw)
+          : DEFAULT_WS_PORT;
+
+      const docUrl = new URL(chrome.runtime.getURL("offscreen.html"));
+      docUrl.searchParams.set("port", String(port));
+
+      try {
+        await chrome.offscreen.createDocument({
+          url: docUrl.href,
+          reasons: [chrome.offscreen.Reason.DOM_SCRAPING],
+          justification:
+            "Maintain persistent WebSocket connection to poke-browser MCP server for browser automation",
+        });
+        console.error("[poke-browser ext] Offscreen document created");
+      } catch (err) {
+        const msg =
+          err && typeof err === "object" && "message" in err
+            ? String(/** @type {{ message?: string }} */ (err).message)
+            : String(err);
+        if (msg.includes("single offscreen document") || msg.includes("already exists")) {
+          console.error(
+            "[poke-browser ext] Offscreen already exists (concurrent creation), ignoring",
+          );
+        } else {
+          console.error("[poke-browser ext] Failed to create offscreen document:", err);
+          throw err;
+        }
+      }
+    } finally {
+      offscreenCreatingPromise = null;
+    }
+  })();
+
+  return offscreenCreatingPromise;
 }
 
 function scheduleKeepAliveAlarm() {
@@ -85,7 +133,11 @@ function scheduleKeepAliveAlarm() {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== KEEPALIVE_ALARM) return;
   void (async () => {
-    await ensureOffscreenDocument();
+    try {
+      await setupOffscreen();
+    } catch (e) {
+      console.error("[poke-browser ext] setupOffscreen failed:", e);
+    }
     try {
       bridgePort?.postMessage({ type: "sw_wake" });
     } catch {
@@ -96,9 +148,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 async function ensureOffscreenAndSchedule() {
   try {
-    await ensureOffscreenDocument();
+    await setupOffscreen();
   } catch (e) {
-    console.error("[poke-browser ext] offscreen create failed:", e);
+    console.error("[poke-browser ext] setupOffscreen failed:", e);
   }
   scheduleKeepAliveAlarm();
 }
