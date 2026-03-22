@@ -77,8 +77,9 @@ function scheduleReconnectAfterClose(closeCode = 0) {
     return;
   }
   let delay = wsRetryDelayMs;
+  /** Code 4000 was historically used for "replaced" closes; wait ≥5s before retry to avoid tight reconnect loops. */
   if (closeCode === 4000) {
-    delay = Math.max(delay, 3000);
+    delay = Math.max(delay, 5000);
   }
   wsRetryDelayMs = Math.min(wsRetryDelayMs * 2, WS_MAX_RETRY_MS);
   wsReconnectCycles += 1;

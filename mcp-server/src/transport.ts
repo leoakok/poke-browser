@@ -249,6 +249,15 @@ export async function startExtensionWebSocketServer(
   b: ExtensionBridge,
   options: ExtensionWsServerOptions = {},
 ): Promise<WebSocketServer> {
+  /** Same-process guard: do not register a second `connection` handler or bind the same port twice. */
+  if (extensionWebSocketServer !== null) {
+    const addr = extensionWebSocketServer.address();
+    if (addr !== null && typeof addr === "object" && "port" in addr && addr.port === port) {
+      log("[poke-browser-mcp] WebSocket server already listening on this port; skipping duplicate start");
+      return extensionWebSocketServer;
+    }
+  }
+
   const expectedToken =
     typeof options.authToken === "string" && options.authToken.length > 0
       ? options.authToken
@@ -290,6 +299,8 @@ export async function startExtensionWebSocketServer(
     let authenticated = false;
     let pingInterval: NodeJS.Timeout | null = null;
     let pongDeadline: NodeJS.Timeout | null = null;
+    /** Require two consecutive missed pongs before terminate (avoids flaky clients / scheduling glitches). */
+    let missedPongs = 0;
 
     const clearPongDeadline = (): void => {
       if (pongDeadline) {
@@ -308,15 +319,22 @@ export async function startExtensionWebSocketServer(
 
     const startPing = (): void => {
       stopPing();
+      missedPongs = 0;
       pingInterval = setInterval(() => {
         if (ws.readyState !== WebSocket.OPEN) return;
         clearPongDeadline();
         pongDeadline = setTimeout(() => {
-          console.error("[poke-browser-mcp] WebSocket client missed pong deadline; terminating client");
-          try {
-            ws.terminate();
-          } catch {
-            /* ignore */
+          missedPongs += 1;
+          if (missedPongs >= 2) {
+            console.error(
+              "[poke-browser-mcp] WebSocket client missed pong deadline twice; terminating client",
+            );
+            stopPing();
+            try {
+              ws.terminate();
+            } catch {
+              /* ignore */
+            }
           }
         }, WS_PONG_DEADLINE_MS);
         try {
@@ -325,6 +343,7 @@ export async function startExtensionWebSocketServer(
           /* ignore */
         }
       }, WS_PING_INTERVAL_MS);
+      pingInterval.unref();
     };
 
     try {
@@ -334,6 +353,7 @@ export async function startExtensionWebSocketServer(
     }
 
     ws.on("pong", () => {
+      missedPongs = 0;
       clearPongDeadline();
     });
 
@@ -419,6 +439,7 @@ export async function startExtensionWebSocketServer(
 
     ws.on("error", (err) => {
       console.error("[poke-browser-mcp] WebSocket socket error:", err.message);
+      stopPing();
     });
   });
 
