@@ -154,7 +154,7 @@ function logAndStartExtensionWebSocket(port: number): Promise<WebSocketServer> {
     );
   } else {
     console.error(
-      "[poke-browser-mcp] Running in dev mode (POKE_BROWSER_TOKEN unset): WebSocket auth disabled",
+      `[poke-browser] WebSocket Server active on port ${port} (Mode: Development/Open)`,
     );
   }
   return startExtensionWebSocketServer(port, bridge, { authToken });

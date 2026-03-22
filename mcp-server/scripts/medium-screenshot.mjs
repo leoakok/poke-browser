@@ -20,7 +20,7 @@ await client.connect(transport);
 /** Wait for extension WebSocket (e.g. after MCP process restart). */
 for (let i = 0; i < 40; i += 1) {
   const probe = await client.callTool({
-    name: "manage_tabs",
+    name: "managetabs",
     arguments: { action: "list" },
   });
   const txt = probe.content?.find((c) => c.type === "text")?.text ?? "";

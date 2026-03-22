@@ -180,7 +180,7 @@ export function registerTools(mcp) {
             userAgent: z.string().optional(),
         },
     }, async ({ tabId, device, width, height, deviceScaleFactor, userAgent }) => callTool("device_emulate", { tabId, device, width, height, deviceScaleFactor, userAgent }, 30_000));
-    mcp.registerTool("manage_tabs", {
+    mcp.registerTool("managetabs", {
         description: "List tabs, read the active tab, open, close, or switch tabs in the connected Chrome profile.",
         inputSchema: manageTabsInputSchema,
     }, async (args) => {

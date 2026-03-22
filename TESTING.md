@@ -45,7 +45,7 @@ Tool names match `mcp-server/src/tools.ts` (MCP tool → extension `command` in 
 
 Expected (shape): `{ "success": true, "finalUrl": "...", "title": "..." }`
 
-### manage_tabs (list)
+### managetabs (list)
 
 ```json
 { "action": "list" }

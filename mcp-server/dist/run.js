@@ -118,7 +118,7 @@ function logAndStartExtensionWebSocket(port) {
         console.error("[poke-browser-mcp] Set the extension popup Auth token (storage key wsAuthToken) to the same value.");
     }
     else {
-        console.error("[poke-browser-mcp] Running in dev mode (POKE_BROWSER_TOKEN unset): WebSocket auth disabled");
+        console.error(`[poke-browser] WebSocket Server active on port ${port} (Mode: Development/Open)`);
     }
     return startExtensionWebSocketServer(port, bridge, { authToken });
 }

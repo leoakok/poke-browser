@@ -262,7 +262,7 @@ export function registerTools(mcp: McpServer): void {
   );
 
   mcp.registerTool(
-    "manage_tabs",
+    "managetabs",
     {
       description:
         "List tabs, read the active tab, open, close, or switch tabs in the connected Chrome profile.",
