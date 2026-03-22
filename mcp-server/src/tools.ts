@@ -446,4 +446,99 @@ export function registerTools(mcp: McpServer): void {
     },
     async ({ selector, x, y, tabId }) => callTool("hover_element", { selector, x, y, tabId })
   );
+
+  const fillFormFieldSchema = z.object({
+    selector: z.string().min(1),
+    value: z.string(),
+    type: z.enum(["text", "select", "checkbox", "radio", "file"]).optional(),
+  });
+
+  mcp.registerTool(
+    "script_inject",
+    {
+      description:
+        "Inject a `<script>` into the page DOM (main world), unlike evaluate_js/execute_script isolated worlds. Optional persistent registration survives navigations on the same origin via a bundled loader + storage.",
+      inputSchema: {
+        script: z.string().min(1).describe("JavaScript source executed as a classic script tag in the page"),
+        tabId: tabIdSchema.optional(),
+        persistent: z.boolean().optional().describe("If true, store and re-inject on future loads for this origin (registerContentScripts)"),
+        runAt: z
+          .enum(["document_start", "document_end", "document_idle"])
+          .optional()
+          .describe("When to inject (default document_idle for one-shot; persistent loader honors timing per entry)"),
+      },
+    },
+    async ({ script, tabId, persistent, runAt }) =>
+      callTool(
+        "script_inject",
+        { script, tabId, persistent, runAt: runAt ?? "document_idle" },
+        EVALUATE_JS_TIMEOUT_MS
+      )
+  );
+
+  mcp.registerTool(
+    "cookie_manager",
+    {
+      description:
+        "Read/write/delete cookies via chrome.cookies (Chrome profile). Actions: get, get_all, set, delete, delete_all.",
+      inputSchema: {
+        action: z.enum(["get", "get_all", "set", "delete", "delete_all"]),
+        url: z.string().optional().describe("Cookie store URL (often required for get/set/delete)"),
+        name: z.string().optional(),
+        value: z.string().optional(),
+        domain: z.string().optional().describe("For get_all / delete_all / some set operations"),
+        path: z.string().optional(),
+        secure: z.boolean().optional(),
+        httpOnly: z.boolean().optional(),
+        expirationDate: z.number().optional(),
+        tabId: tabIdSchema.optional().describe("Derive url from tab when url omitted"),
+      },
+    },
+    async (args) => callTool("cookie_manager", args, PENDING_REQUEST_TIMEOUT_MS)
+  );
+
+  mcp.registerTool(
+    "fill_form",
+    {
+      description:
+        "Fill multiple form fields in one round trip (text, select, checkbox, radio). Optional form submit via selector or default submit button.",
+      inputSchema: {
+        fields: z.array(fillFormFieldSchema).min(1),
+        tabId: tabIdSchema.optional(),
+        submitAfter: z.boolean().optional(),
+        submitSelector: z.string().optional().describe("CSS selector for submit control; else first [type=submit] in same form"),
+      },
+    },
+    async ({ fields, tabId, submitAfter, submitSelector }) =>
+      callTool("fill_form", { fields, tabId, submitAfter, submitSelector }, EVALUATE_JS_TIMEOUT_MS)
+  );
+
+  mcp.registerTool(
+    "get_storage",
+    {
+      description:
+        "Read localStorage, sessionStorage (page origin), or cookies (Chrome cookie store for the tab URL). Single key or entire map.",
+      inputSchema: {
+        type: z.enum(["local", "session", "cookie"]),
+        key: z.string().optional(),
+        tabId: tabIdSchema.optional(),
+      },
+    },
+    async ({ type, key, tabId }) => callTool("get_storage", { type, key, tabId }, EVALUATE_JS_TIMEOUT_MS)
+  );
+
+  mcp.registerTool(
+    "set_storage",
+    {
+      description: "Write a key to localStorage or sessionStorage in the page origin (not cookies).",
+      inputSchema: {
+        type: z.enum(["local", "session"]),
+        key: z.string().min(1),
+        value: z.string(),
+        tabId: tabIdSchema.optional(),
+      },
+    },
+    async ({ type, key, value, tabId }) =>
+      callTool("set_storage", { type, key, value, tabId }, PENDING_REQUEST_TIMEOUT_MS)
+  );
 }

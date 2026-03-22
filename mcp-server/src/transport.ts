@@ -29,7 +29,12 @@ export type ExtensionCommand =
   | "clear_network_logs"
   | "start_network_capture"
   | "stop_network_capture"
-  | "hover_element";
+  | "hover_element"
+  | "script_inject"
+  | "cookie_manager"
+  | "fill_form"
+  | "get_storage"
+  | "set_storage";
 
 export type CommandMessage = {
   type: "command";

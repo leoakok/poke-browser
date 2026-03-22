@@ -205,5 +205,150 @@ export function registerTools(mcp) {
                 .describe("structured (default), text, or markdown"),
         },
     }, async ({ tabId, format }) => callTool("read_page", { tabId, format }, EVALUATE_JS_TIMEOUT_MS));
+    mcp.registerTool("wait_for_selector", {
+        description: "Poll every 100ms until a CSS selector or XPath matches in the page (content script). Optional strict visibility checks.",
+        inputSchema: {
+            selector: z
+                .string()
+                .min(1)
+                .describe("CSS selector, '//xpath', or 'xpath:expr' (same as find_element)"),
+            tabId: tabIdSchema.optional(),
+            timeout: z
+                .number()
+                .int()
+                .positive()
+                .max(120_000)
+                .optional()
+                .describe("Max wait in ms (default 10000)"),
+            visible: z
+                .boolean()
+                .optional()
+                .describe("If true, require visible layout (offsetParent / fixed-sticky rules) and not display:none, visibility:hidden, or opacity:0"),
+        },
+    }, async ({ selector, tabId, timeout, visible }) => {
+        const t = timeout ?? 10_000;
+        return callTool("wait_for_selector", { selector, tabId, timeout: t, visible }, t + 3000);
+    });
+    mcp.registerTool("execute_script", {
+        description: "Run an async script in the page main world via chrome.scripting. The script body is wrapped so `await` works; `args` is available as `args`. Result is JSON-clone-safe (circular refs become \"[Circular]\").",
+        inputSchema: {
+            script: z.string().min(1).describe("JavaScript source body executed as async IIFE"),
+            tabId: tabIdSchema.optional(),
+            args: z.array(z.unknown()).optional().describe("Array available inside the script as `args`"),
+        },
+    }, async ({ script, tabId, args }) => callTool("execute_script", { script, tabId, args: args ?? [] }, 60_000));
+    mcp.registerTool("get_console_logs", {
+        description: "Read console entries captured by the content script ring buffer (max 500). Requires the page to have loaded the poke-browser content script.",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+            level: z.enum(["all", "error", "warn", "info", "log"]).optional().describe("Filter (default all)"),
+            limit: z.number().int().positive().max(500).optional().describe("Max entries (default 100)"),
+        },
+    }, async ({ tabId, level, limit }) => callTool("get_console_logs", { tabId, level: level ?? "all", limit: limit ?? 100 }));
+    mcp.registerTool("clear_console_logs", {
+        description: "Clear the tab's console capture ring buffer in the content script.",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+        },
+    }, async ({ tabId }) => callTool("clear_console_logs", { tabId }));
+    mcp.registerTool("start_network_capture", {
+        description: "Enable CDP Network.* events for a tab and clear its prior in-memory network buffer (max 200 requests per tab).",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+        },
+    }, async ({ tabId }) => callTool("start_network_capture", { tabId }));
+    mcp.registerTool("stop_network_capture", {
+        description: "Detach CDP from the tab when it was attached only for network capture (stops new events).",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+        },
+    }, async ({ tabId }) => callTool("stop_network_capture", { tabId }));
+    mcp.registerTool("get_network_logs", {
+        description: "Return buffered network requests for a tab. Optionally include response bodies (Network.getResponseBody). Use start_network_capture first to record new traffic.",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+            filter: z.string().optional().describe("Substring filter on URL"),
+            limit: z.number().int().positive().max(200).optional().describe("Max entries (default 50)"),
+            includeBody: z.boolean().optional().describe("Fetch bodies for completed requests (slower)"),
+        },
+    }, async ({ tabId, filter, limit, includeBody }) => callTool("get_network_logs", {
+        tabId,
+        filter,
+        limit: limit ?? 50,
+        includeBody: includeBody === true,
+    }, includeBody === true ? 60_000 : PENDING_REQUEST_TIMEOUT_MS));
+    mcp.registerTool("clear_network_logs", {
+        description: "Clear in-memory network request buffer for a tab.",
+        inputSchema: {
+            tabId: tabIdSchema.optional(),
+        },
+    }, async ({ tabId }) => callTool("clear_network_logs", { tabId }));
+    mcp.registerTool("hover_element", {
+        description: "Hover using a selector (content script: mousemove/mouseover/mouseenter at element center) or viewport coordinates (CDP mouseMoved).",
+        inputSchema: {
+            selector: z.string().min(1).optional(),
+            x: z.number().optional(),
+            y: z.number().optional(),
+            tabId: tabIdSchema.optional(),
+        },
+    }, async ({ selector, x, y, tabId }) => callTool("hover_element", { selector, x, y, tabId }));
+    const fillFormFieldSchema = z.object({
+        selector: z.string().min(1),
+        value: z.string(),
+        type: z.enum(["text", "select", "checkbox", "radio", "file"]).optional(),
+    });
+    mcp.registerTool("script_inject", {
+        description: "Inject a `<script>` into the page DOM (main world), unlike evaluate_js/execute_script isolated worlds. Optional persistent registration survives navigations on the same origin via a bundled loader + storage.",
+        inputSchema: {
+            script: z.string().min(1).describe("JavaScript source executed as a classic script tag in the page"),
+            tabId: tabIdSchema.optional(),
+            persistent: z.boolean().optional().describe("If true, store and re-inject on future loads for this origin (registerContentScripts)"),
+            runAt: z
+                .enum(["document_start", "document_end", "document_idle"])
+                .optional()
+                .describe("When to inject (default document_idle for one-shot; persistent loader honors timing per entry)"),
+        },
+    }, async ({ script, tabId, persistent, runAt }) => callTool("script_inject", { script, tabId, persistent, runAt: runAt ?? "document_idle" }, EVALUATE_JS_TIMEOUT_MS));
+    mcp.registerTool("cookie_manager", {
+        description: "Read/write/delete cookies via chrome.cookies (Chrome profile). Actions: get, get_all, set, delete, delete_all.",
+        inputSchema: {
+            action: z.enum(["get", "get_all", "set", "delete", "delete_all"]),
+            url: z.string().optional().describe("Cookie store URL (often required for get/set/delete)"),
+            name: z.string().optional(),
+            value: z.string().optional(),
+            domain: z.string().optional().describe("For get_all / delete_all / some set operations"),
+            path: z.string().optional(),
+            secure: z.boolean().optional(),
+            httpOnly: z.boolean().optional(),
+            expirationDate: z.number().optional(),
+            tabId: tabIdSchema.optional().describe("Derive url from tab when url omitted"),
+        },
+    }, async (args) => callTool("cookie_manager", args, PENDING_REQUEST_TIMEOUT_MS));
+    mcp.registerTool("fill_form", {
+        description: "Fill multiple form fields in one round trip (text, select, checkbox, radio). Optional form submit via selector or default submit button.",
+        inputSchema: {
+            fields: z.array(fillFormFieldSchema).min(1),
+            tabId: tabIdSchema.optional(),
+            submitAfter: z.boolean().optional(),
+            submitSelector: z.string().optional().describe("CSS selector for submit control; else first [type=submit] in same form"),
+        },
+    }, async ({ fields, tabId, submitAfter, submitSelector }) => callTool("fill_form", { fields, tabId, submitAfter, submitSelector }, EVALUATE_JS_TIMEOUT_MS));
+    mcp.registerTool("get_storage", {
+        description: "Read localStorage, sessionStorage (page origin), or cookies (Chrome cookie store for the tab URL). Single key or entire map.",
+        inputSchema: {
+            type: z.enum(["local", "session", "cookie"]),
+            key: z.string().optional(),
+            tabId: tabIdSchema.optional(),
+        },
+    }, async ({ type, key, tabId }) => callTool("get_storage", { type, key, tabId }, EVALUATE_JS_TIMEOUT_MS));
+    mcp.registerTool("set_storage", {
+        description: "Write a key to localStorage or sessionStorage in the page origin (not cookies).",
+        inputSchema: {
+            type: z.enum(["local", "session"]),
+            key: z.string().min(1),
+            value: z.string(),
+            tabId: tabIdSchema.optional(),
+        },
+    }, async ({ type, key, value, tabId }) => callTool("set_storage", { type, key, value, tabId }, PENDING_REQUEST_TIMEOUT_MS));
 }
 //# sourceMappingURL=tools.js.map

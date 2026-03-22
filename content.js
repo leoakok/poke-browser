@@ -962,6 +962,210 @@ function handleHoverElement(message, sendResponse) {
   });
 }
 
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleScriptInject(message, sendResponse) {
+  const m = /** @type {{ script?: string }} */ (message);
+  const script = typeof m.script === "string" ? m.script : "";
+  if (!script) {
+    sendResponse({ success: false });
+    return;
+  }
+  try {
+    const s = document.createElement("script");
+    s.textContent = script;
+    const root = document.documentElement || document.head || document.body;
+    if (!root) {
+      sendResponse({ success: false });
+      return;
+    }
+    root.appendChild(s);
+    s.remove();
+    sendResponse({ success: true });
+  } catch (err) {
+    sendResponse({ success: false, error: String(err) });
+  }
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleFillForm(message, sendResponse) {
+  const m = /** @type {{
+    fields?: Array<{ selector?: string; value?: string; type?: string }>;
+    submitAfter?: boolean;
+    submitSelector?: string;
+  }} */ (message);
+  const fields = Array.isArray(m.fields) ? m.fields : [];
+  /** @type {Array<{ selector: string; error: string }>} */
+  const errors = [];
+  let filled = 0;
+
+  for (const f of fields) {
+    const sel = typeof f.selector === "string" ? f.selector : "";
+    const val = typeof f.value === "string" ? f.value : "";
+    const typ = f.type === "select" || f.type === "checkbox" || f.type === "radio" || f.type === "file" ? f.type : "text";
+    if (!sel) {
+      errors.push({ selector: sel, error: "empty selector" });
+      continue;
+    }
+    const el = querySelectorOrXPath(sel);
+    if (!el) {
+      errors.push({ selector: sel, error: "not found" });
+      continue;
+    }
+    try {
+      if (typ === "file") {
+        errors.push({ selector: sel, error: "file inputs are not supported" });
+        continue;
+      }
+      if (typ === "checkbox") {
+        const input = el instanceof HTMLInputElement ? el : null;
+        if (!input || input.type !== "checkbox") {
+          errors.push({ selector: sel, error: "not a checkbox input" });
+          continue;
+        }
+        const vl = val.toLowerCase();
+        input.checked = !(vl === "false" || val === "0" || vl === "off" || val === "");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        filled += 1;
+        continue;
+      }
+      if (typ === "radio") {
+        const input = el instanceof HTMLInputElement ? el : null;
+        if (!input || input.type !== "radio") {
+          errors.push({ selector: sel, error: "not a radio input" });
+          continue;
+        }
+        const vl = val.toLowerCase();
+        const off = val === "" || vl === "false" || val === "0" || vl === "off";
+        if (off) {
+          input.checked = false;
+        } else {
+          input.checked = true;
+          if (input.form) {
+            const rads = input.form.querySelectorAll('input[type="radio"]');
+            rads.forEach((x) => {
+              if (x instanceof HTMLInputElement && x.name === input.name && x !== input) {
+                x.checked = false;
+              }
+            });
+          }
+        }
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+        filled += 1;
+        continue;
+      }
+      if (typ === "select" && el instanceof HTMLSelectElement) {
+        let matched = false;
+        for (let i = 0; i < el.options.length; i += 1) {
+          const o = el.options[i];
+          if (o.value === val || o.text === val) {
+            el.selectedIndex = i;
+            matched = true;
+            break;
+          }
+        }
+        if (!matched) el.value = val;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        filled += 1;
+        continue;
+      }
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        el.focus();
+        el.value = val;
+        el.dispatchEvent(
+          new InputEvent("input", { bubbles: true, data: val, inputType: "insertReplacementText" }),
+        );
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        filled += 1;
+        continue;
+      }
+      errors.push({ selector: sel, error: "unsupported element for text fill" });
+    } catch (err) {
+      errors.push({ selector: sel, error: String(err) });
+    }
+  }
+
+  let success = errors.length === 0;
+  if (m.submitAfter === true) {
+    const subSel = typeof m.submitSelector === "string" ? m.submitSelector.trim() : "";
+    let sub = subSel ? querySelectorOrXPath(subSel) : null;
+    if (!sub && fields[0]) {
+      const firstSel = typeof fields[0].selector === "string" ? fields[0].selector : "";
+      const first = firstSel ? querySelectorOrXPath(firstSel) : null;
+      const form = first && first.closest ? first.closest("form") : null;
+      if (form) {
+        sub =
+          form.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
+      }
+    }
+    if (sub) {
+      syntheticClick(sub);
+    } else {
+      errors.push({ selector: "[submit]", error: "no submit control found" });
+      success = false;
+    }
+  }
+
+  sendResponse({ success, filled, errors });
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleGetStoragePage(message, sendResponse) {
+  const m = /** @type {{ storageType?: string; key?: string }} */ (message);
+  const useSession = m.storageType === "session";
+  const t = useSession ? sessionStorage : localStorage;
+  const key = typeof m.key === "string" ? m.key : undefined;
+  /** @type {Record<string, string>} */
+  const data = {};
+  try {
+    if (key) {
+      const v = t.getItem(key);
+      if (v !== null) data[key] = v;
+    } else {
+      for (let i = 0; i < t.length; i += 1) {
+        const k = t.key(i);
+        if (k) data[k] = t.getItem(k) ?? "";
+      }
+    }
+    sendResponse({ data, count: Object.keys(data).length });
+  } catch (err) {
+    sendResponse({ data: {}, count: 0, error: String(err) });
+  }
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleSetStoragePage(message, sendResponse) {
+  const m = /** @type {{ storageType?: string; key?: string; value?: string }} */ (message);
+  const useSession = m.storageType === "session";
+  const t = useSession ? sessionStorage : localStorage;
+  const key = typeof m.key === "string" ? m.key : "";
+  const value = typeof m.value === "string" ? m.value : "";
+  if (!key) {
+    sendResponse({ success: false });
+    return;
+  }
+  try {
+    t.setItem(key, value);
+    sendResponse({ success: true });
+  } catch (err) {
+    sendResponse({ success: false, error: String(err) });
+  }
+}
+
 function handleReadPage(message, sendResponse) {
   const m = /** @type {{ format?: string }} */ (message);
   const format =
@@ -1005,6 +1209,10 @@ const MESSAGE_HANDLERS = {
   POKE_GET_CONSOLE_LOGS: handleGetConsoleLogs,
   POKE_CLEAR_CONSOLE_LOGS: handleClearConsoleLogs,
   POKE_HOVER_ELEMENT: handleHoverElement,
+  POKE_SCRIPT_INJECT: handleScriptInject,
+  POKE_FILL_FORM: handleFillForm,
+  POKE_GET_STORAGE: handleGetStoragePage,
+  POKE_SET_STORAGE: handleSetStoragePage,
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

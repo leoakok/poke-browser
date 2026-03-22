@@ -826,6 +826,268 @@ async function handleClearNetworkLogs(payload) {
   return { cleared: true, tabId };
 }
 
+const PERSISTENT_LOADER_ID = "poke-browser-persistent-loader";
+
+/**
+ * @param {chrome.cookies.Cookie} c
+ */
+function cookieRemoveUrl(c) {
+  const dom = c.domain.startsWith(".") ? c.domain.slice(1) : c.domain;
+  const scheme = c.secure ? "https" : "http";
+  const path = c.path && c.path.length ? c.path : "/";
+  return `${scheme}://${dom}${path}`;
+}
+
+/**
+ * @param {chrome.cookies.Cookie} c
+ */
+function serializeCookie(c) {
+  return {
+    name: c.name,
+    value: c.value,
+    domain: c.domain,
+    path: c.path,
+    secure: c.secure,
+    httpOnly: c.httpOnly,
+    sameSite: c.sameSite,
+    expirationDate: c.expirationDate,
+    session: c.session,
+  };
+}
+
+async function ensurePersistentLoaderRegistered() {
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids: [PERSISTENT_LOADER_ID] });
+  if (Array.isArray(existing) && existing.length > 0) return;
+  await chrome.scripting.registerContentScripts([
+    {
+      id: PERSISTENT_LOADER_ID,
+      matches: ["<all_urls>"],
+      js: ["persistent-loader.js"],
+      runAt: "document_start",
+    },
+  ]);
+}
+
+/**
+ * @param {number} tabId
+ */
+async function tabHttpUrl(tabId) {
+  const tab = await chrome.tabs.get(tabId);
+  const u = tab.url ?? "";
+  if (!u.startsWith("http://") && !u.startsWith("https://")) {
+    throw new Error("Tab must have an http(s) URL for this operation");
+  }
+  return u;
+}
+
+/** @param {unknown} payload */
+async function handleScriptInject(payload) {
+  const p = asPayload(payload);
+  const script = typeof p.script === "string" ? p.script : "";
+  if (!script.trim()) throw new Error("script_inject requires script");
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  await tabHttpUrl(tabId);
+  const persistent = p.persistent === true;
+  const runAt =
+    p.runAt === "document_start" || p.runAt === "document_end" || p.runAt === "document_idle"
+      ? p.runAt
+      : "document_idle";
+
+  if (persistent) {
+    const tab = await chrome.tabs.get(tabId);
+    const url = tab.url ?? "";
+    const u = new URL(url);
+    const matchPattern = `${u.origin}/*`;
+    const injectionId = `poke-${crypto.randomUUID()}`;
+    const got = await chrome.storage.local.get("pokePersistentInjections");
+    const list = Array.isArray(got.pokePersistentInjections) ? got.pokePersistentInjections : [];
+    list.push({ id: injectionId, matchPattern, script, runAt });
+    await chrome.storage.local.set({ pokePersistentInjections: list });
+    await ensurePersistentLoaderRegistered();
+    return { success: true, injectionId };
+  }
+
+  if (runAt === "document_idle") {
+    const res = await chrome.tabs.sendMessage(tabId, { type: "POKE_SCRIPT_INJECT", script }).catch((e) => {
+      throw new Error(`script_inject relay failed: ${String(e)}`);
+    });
+    return { success: Boolean(res && res.success === true) };
+  }
+
+  await chrome.scripting.executeScript({
+    target: { tabId, allFrames: false },
+    world: "MAIN",
+    injectImmediately: runAt === "document_start",
+    func: (code) => {
+      const s = document.createElement("script");
+      s.textContent = code;
+      const r = document.documentElement || document.head || document.body;
+      if (r) {
+        r.appendChild(s);
+        s.remove();
+      }
+    },
+    args: [script],
+  });
+  return { success: true };
+}
+
+/** @param {unknown} payload */
+async function handleCookieManager(payload) {
+  const p = asPayload(payload);
+  const action =
+    p.action === "get" || p.action === "get_all" || p.action === "set" || p.action === "delete" || p.action === "delete_all"
+      ? p.action
+      : null;
+  if (!action) throw new Error("cookie_manager requires action");
+
+  const tabId =
+    typeof p.tabId === "number" && Number.isFinite(p.tabId) ? await resolveTabId(p.tabId) : undefined;
+
+  /** @type {string | undefined} */
+  let baseUrl = typeof p.url === "string" && p.url.length > 0 ? p.url : undefined;
+  if (!baseUrl && tabId != null) {
+    try {
+      baseUrl = await tabHttpUrl(tabId);
+    } catch {
+      /* tab may be invalid for http(s); leave baseUrl unset */
+    }
+  }
+
+  if (action === "get") {
+    const name = typeof p.name === "string" ? p.name : "";
+    if (!name) throw new Error("cookie get requires name");
+    if (!baseUrl) throw new Error("cookie get requires url or http(s) tabId");
+    const c = await chrome.cookies.get({ url: baseUrl, name });
+    return { success: true, cookie: c ? serializeCookie(c) : undefined };
+  }
+
+  if (action === "get_all") {
+    /** @type {chrome.cookies.GetAllDetails} */
+    const q = {};
+    if (baseUrl) q.url = baseUrl;
+    const dom = typeof p.domain === "string" && p.domain.length > 0 ? p.domain : undefined;
+    if (dom) q.domain = dom;
+    if (!q.url && !q.domain) throw new Error("cookie get_all requires url/domain or http(s) tabId");
+    const all = await chrome.cookies.getAll(q);
+    const cookies = all.map(serializeCookie);
+    return { success: true, cookie: cookies };
+  }
+
+  if (action === "set") {
+    const name = typeof p.name === "string" ? p.name : "";
+    if (!name) throw new Error("cookie set requires name");
+    const value = typeof p.value === "string" ? p.value : "";
+    if (!baseUrl && typeof p.domain !== "string") {
+      throw new Error("cookie set requires url or tab with http(s) URL, or domain");
+    }
+    /** @type {chrome.cookies.SetDetails} */
+    const details = { name, value };
+    if (baseUrl) details.url = baseUrl;
+    if (typeof p.domain === "string") details.domain = p.domain;
+    if (typeof p.path === "string") details.path = p.path;
+    if (p.secure === true) details.secure = true;
+    if (p.httpOnly === true) details.httpOnly = true;
+    if (typeof p.expirationDate === "number") details.expirationDate = p.expirationDate;
+    const c = await chrome.cookies.set(details);
+    if (!c) return { success: false, cookie: undefined };
+    return { success: true, cookie: serializeCookie(c) };
+  }
+
+  if (action === "delete") {
+    const name = typeof p.name === "string" ? p.name : "";
+    if (!name) throw new Error("cookie delete requires name");
+    if (!baseUrl) throw new Error("cookie delete requires url or http(s) tabId");
+    const res = await chrome.cookies.remove({ url: baseUrl, name });
+    return { success: Boolean(res) };
+  }
+
+  if (action === "delete_all") {
+    const dom = typeof p.domain === "string" ? p.domain.trim() : "";
+    if (!dom) throw new Error("cookie delete_all requires domain");
+    const normalized = dom.startsWith(".") ? dom : `.${dom}`;
+    const all = await chrome.cookies.getAll({ domain: normalized });
+    for (const c of all) {
+      const u = cookieRemoveUrl(c);
+      await chrome.cookies.remove({ url: u, name: c.name });
+    }
+    return { success: true, cookie: all.map(serializeCookie) };
+  }
+
+  throw new Error("cookie_manager: unsupported action");
+}
+
+/** @param {unknown} payload */
+async function handleFillForm(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  const fields = Array.isArray(p.fields) ? p.fields : [];
+  const res = await chrome.tabs
+    .sendMessage(tabId, {
+      type: "POKE_FILL_FORM",
+      fields,
+      submitAfter: p.submitAfter === true,
+      submitSelector: typeof p.submitSelector === "string" ? p.submitSelector : undefined,
+    })
+    .catch((e) => {
+      throw new Error(`fill_form relay failed: ${String(e)}`);
+    });
+  return res;
+}
+
+/** @param {unknown} payload */
+async function handleGetStorage(payload) {
+  const p = asPayload(payload);
+  const type = p.type === "local" || p.type === "session" || p.type === "cookie" ? p.type : "local";
+  const key = typeof p.key === "string" ? p.key : undefined;
+
+  if (type === "cookie") {
+    const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+    const url = await tabHttpUrl(tabId);
+    const all = await chrome.cookies.getAll({ url });
+    /** @type {Record<string, string>} */
+    const data = {};
+    for (const c of all) {
+      if (key && c.name !== key) continue;
+      data[c.name] = c.value;
+    }
+    return { data, count: Object.keys(data).length };
+  }
+
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  const res = await chrome.tabs
+    .sendMessage(tabId, {
+      type: "POKE_GET_STORAGE",
+      storageType: type,
+      key,
+    })
+    .catch((e) => {
+      throw new Error(`get_storage relay failed: ${String(e)}`);
+    });
+  return res;
+}
+
+/** @param {unknown} payload */
+async function handleSetStorage(payload) {
+  const p = asPayload(payload);
+  const type = p.type === "local" || p.type === "session" ? p.type : "local";
+  const key = typeof p.key === "string" ? p.key : "";
+  const value = typeof p.value === "string" ? p.value : "";
+  if (!key) throw new Error("set_storage requires key");
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  const res = await chrome.tabs
+    .sendMessage(tabId, {
+      type: "POKE_SET_STORAGE",
+      storageType: type,
+      key,
+      value,
+    })
+    .catch((e) => {
+      throw new Error(`set_storage relay failed: ${String(e)}`);
+    });
+  return res;
+}
+
 /** @param {unknown} payload */
 async function handleHoverElement(payload) {
   const p = asPayload(payload);
@@ -919,6 +1181,11 @@ const COMMAND_HANDLERS = {
   start_network_capture: handleStartNetworkCapture,
   stop_network_capture: handleStopNetworkCapture,
   hover_element: handleHoverElement,
+  script_inject: handleScriptInject,
+  cookie_manager: handleCookieManager,
+  fill_form: handleFillForm,
+  get_storage: handleGetStorage,
+  set_storage: handleSetStorage,
 };
 
 /**
