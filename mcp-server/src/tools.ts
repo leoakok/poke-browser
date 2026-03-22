@@ -178,6 +178,80 @@ export function registerTools(mcp: McpServer): void {
   );
 
   mcp.registerTool(
+    "full_page_capture",
+    {
+      description:
+        "Capture a full-page screenshot by scrolling the viewport and stitching strips (OffscreenCanvas). Slower than capture_screenshot; may duplicate fixed headers between strips.",
+      inputSchema: {
+        tabId: tabIdSchema.optional(),
+        format: z.enum(["png", "jpeg"]).optional(),
+        quality: z.number().min(0).max(100).optional().describe("JPEG quality when format is jpeg"),
+      },
+    },
+    async ({ tabId, format, quality }): Promise<CallToolResult> => {
+      if (!bridge.isReady()) {
+        return toolError(
+          "Chrome extension is not connected. Load poke-browser in Chrome and ensure the WebSocket port matches POKE_BROWSER_WS_PORT.",
+        );
+      }
+      try {
+        const result = await bridge.request(
+          "full_page_capture",
+          { tabId, format: format ?? "png", quality },
+          120_000,
+        );
+        if (!isScreenshotResultPayload(result)) {
+          return toolError("Extension returned an invalid full_page_capture payload.");
+        }
+        return {
+          content: [
+            {
+              type: "image" as const,
+              data: result.data,
+              mimeType: result.mimeType,
+            },
+          ],
+        };
+      } catch (e) {
+        return toolError(e instanceof Error ? e.message : String(e));
+      }
+    },
+  );
+
+  mcp.registerTool(
+    "pdf_export",
+    {
+      description:
+        "Export the current page as PDF via CDP Page.printToPDF (printBackground true). Returns base64-encoded PDF data.",
+      inputSchema: {
+        tabId: tabIdSchema.optional(),
+        landscape: z.boolean().optional(),
+        scale: z.number().positive().max(2).optional().describe("Scale factor (default 1)"),
+      },
+    },
+    async ({ tabId, landscape, scale }) =>
+      callTool("pdf_export", { tabId, landscape, scale }, 120_000),
+  );
+
+  mcp.registerTool(
+    "device_emulate",
+    {
+      description:
+        "Apply CDP device metrics and optional user-agent override (mobile/tablet/desktop presets). Debugger attaches briefly; viewport may reset when the session detaches.",
+      inputSchema: {
+        tabId: tabIdSchema.optional(),
+        device: z.enum(["mobile", "tablet", "desktop"]).optional().describe("Preset (default desktop)"),
+        width: z.number().int().positive().optional(),
+        height: z.number().int().positive().optional(),
+        deviceScaleFactor: z.number().positive().optional(),
+        userAgent: z.string().optional(),
+      },
+    },
+    async ({ tabId, device, width, height, deviceScaleFactor, userAgent }) =>
+      callTool("device_emulate", { tabId, device, width, height, deviceScaleFactor, userAgent }, 30_000),
+  );
+
+  mcp.registerTool(
     "manage_tabs",
     {
       description:

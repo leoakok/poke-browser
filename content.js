@@ -988,6 +988,33 @@ function handleGetPageErrors(message, sendResponse) {
 }
 
 /**
+ * @param {unknown} _message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleGetScrollInfo(_message, sendResponse) {
+  const de = document.documentElement;
+  const body = document.body;
+  sendResponse({
+    scrollHeight: Math.max(de.scrollHeight, body ? body.scrollHeight : 0, de.clientHeight),
+    innerHeight: window.innerHeight,
+    innerWidth: window.innerWidth,
+    scrollY: window.scrollY,
+    devicePixelRatio: window.devicePixelRatio || 1,
+  });
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleScrollTo(message, sendResponse) {
+  const m = /** @type {{ y?: number }} */ (message);
+  const y = typeof m.y === "number" ? m.y : 0;
+  window.scrollTo({ top: y, left: 0, behavior: "instant" });
+  sendResponse({ scrollY: window.scrollY });
+}
+
+/**
  * @param {unknown} message
  * @param {(r: unknown) => void} sendResponse
  */
@@ -1268,6 +1295,8 @@ const MESSAGE_HANDLERS = {
   POKE_GET_CONSOLE_LOGS: handleGetConsoleLogs,
   POKE_CLEAR_CONSOLE_LOGS: handleClearConsoleLogs,
   POKE_GET_PAGE_ERRORS: handleGetPageErrors,
+  POKE_GET_SCROLL_INFO: handleGetScrollInfo,
+  POKE_SCROLL_TO: handleScrollTo,
   POKE_HOVER_ELEMENT: handleHoverElement,
   POKE_SCRIPT_INJECT: handleScriptInject,
   POKE_FILL_FORM: handleFillForm,

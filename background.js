@@ -708,6 +708,171 @@ async function handleGetPerformanceMetrics(payload) {
   }
 }
 
+/**
+ * @param {ArrayBuffer} buffer
+ */
+function arrayBufferToBase64(buffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.byteLength; i += chunk) {
+    binary += String.fromCharCode.apply(null, /** @type {number[]} */ (Array.from(bytes.subarray(i, i + chunk))));
+  }
+  return btoa(binary);
+}
+
+/**
+ * @param {string[]} dataUrls
+ */
+async function stitchFullPageScreenshots(dataUrls) {
+  if (dataUrls.length === 0) throw new Error("full_page_capture: no strips");
+  /** @type {ImageBitmap[]} */
+  const bitmaps = [];
+  try {
+    for (const u of dataUrls) {
+      const res = await fetch(u);
+      const blob = await res.blob();
+      const bm = await createImageBitmap(blob);
+      bitmaps.push(bm);
+    }
+    let width = 0;
+    let height = 0;
+    for (const bm of bitmaps) {
+      width = Math.max(width, bm.width);
+      height += bm.height;
+    }
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("full_page_capture: no 2d context");
+    let y = 0;
+    for (const bm of bitmaps) {
+      ctx.drawImage(bm, 0, y);
+      y += bm.height;
+    }
+    const mimeType = String(dataUrls[0]).startsWith("data:image/jpeg") ? "image/jpeg" : "image/png";
+    const blob = await canvas.convertToBlob({ type: mimeType });
+    const buf = await blob.arrayBuffer();
+    const b64 = arrayBufferToBase64(buf);
+    return `data:${mimeType};base64,${b64}`;
+  } finally {
+    for (const bm of bitmaps) {
+      try {
+        bm.close();
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+/** @param {unknown} payload */
+async function handleFullPageCapture(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  const tab = await ensureTabVisibleForCapture(tabId);
+  const fmt = p.format === "jpeg" ? "jpeg" : "png";
+  const rawQ = typeof p.quality === "number" ? p.quality : 85;
+  /** @type {{ format: 'png' | 'jpeg', quality?: number }} */
+  const opts =
+    fmt === "jpeg"
+      ? { format: "jpeg", quality: Math.min(100, Math.max(0, rawQ)) }
+      : { format: "png" };
+
+  const info = await chrome.tabs.sendMessage(tabId, { type: "POKE_GET_SCROLL_INFO" }).catch(() => null);
+  if (!info || typeof info !== "object" || typeof /** @type {{ scrollHeight?: unknown }} */ (info).scrollHeight !== "number") {
+    throw new Error("full_page_capture: content script unavailable or invalid scroll info");
+  }
+  const scrollHeight = /** @type {{ scrollHeight: number; innerHeight?: number }} */ (info).scrollHeight;
+  const vh = Math.max(1, Math.floor(/** @type {{ innerHeight?: number }} */ (info).innerHeight || 600));
+
+  /** @type {string[]} */
+  const dataUrls = [];
+  await chrome.tabs.sendMessage(tabId, { type: "POKE_SCROLL_TO", y: 0 });
+  await new Promise((r) => setTimeout(r, 100));
+
+  let y = 0;
+  for (;;) {
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, opts);
+    dataUrls.push(dataUrl);
+    if (y + vh >= scrollHeight - 2) break;
+    y = Math.min(y + vh, Math.max(0, scrollHeight - vh));
+    await chrome.tabs.sendMessage(tabId, { type: "POKE_SCROLL_TO", y });
+    await new Promise((r) => setTimeout(r, 120));
+  }
+
+  await chrome.tabs.sendMessage(tabId, { type: "POKE_SCROLL_TO", y: 0 });
+
+  const stitched = await stitchFullPageScreenshots(dataUrls);
+  const m = /^data:([^;]+);base64,(.+)$/.exec(stitched);
+  if (!m) throw new Error("full_page_capture: invalid stitched data URL");
+  return {
+    type: "screenshot_result",
+    data: m[2],
+    mimeType: m[1],
+  };
+}
+
+/** @param {unknown} payload */
+async function handlePdfExport(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  await ensureTabVisibleForCapture(tabId);
+  await debuggerAttachForTool(tabId);
+  try {
+    const scale = typeof p.scale === "number" && p.scale > 0 ? p.scale : 1;
+    const res = await debuggerSendWithResult(tabId, "Page.printToPDF", {
+      printBackground: true,
+      landscape: p.landscape === true,
+      scale,
+    });
+    const data =
+      res && typeof res === "object" && res !== null && "data" in res
+        ? String(/** @type {{ data?: string }} */ (res).data ?? "")
+        : "";
+    if (!data) throw new Error("pdf_export: printToPDF returned no data");
+    return { success: true, data, mimeType: "application/pdf" };
+  } finally {
+    await debuggerDetachForTool(tabId);
+  }
+}
+
+const DEVICE_PRESETS = {
+  mobile: { width: 390, height: 844, deviceScaleFactor: 3, mobile: true },
+  tablet: { width: 834, height: 1112, deviceScaleFactor: 2, mobile: true },
+  desktop: { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false },
+};
+
+/** @param {unknown} payload */
+async function handleDeviceEmulate(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  const d = p.device === "mobile" || p.device === "tablet" || p.device === "desktop" ? p.device : "desktop";
+  const preset = DEVICE_PRESETS[d];
+  const width = typeof p.width === "number" ? p.width : preset.width;
+  const height = typeof p.height === "number" ? p.height : preset.height;
+  const deviceScaleFactor =
+    typeof p.deviceScaleFactor === "number" ? p.deviceScaleFactor : preset.deviceScaleFactor;
+
+  await debuggerAttachForTool(tabId);
+  try {
+    await debuggerSend(tabId, "Emulation.setDeviceMetricsOverride", {
+      width: Math.round(width),
+      height: Math.round(height),
+      deviceScaleFactor,
+      mobile: preset.mobile,
+      fitWindow: false,
+      scale: 1,
+    });
+    const ua = typeof p.userAgent === "string" && p.userAgent.trim() ? p.userAgent.trim() : undefined;
+    if (ua) {
+      await debuggerSend(tabId, "Network.setUserAgentOverride", { userAgent: ua });
+    }
+    return { success: true };
+  } finally {
+    await debuggerDetachForTool(tabId);
+  }
+}
+
 /** @param {unknown} payload */
 async function handleEvaluateJs(payload) {
   const p = asPayload(payload);
@@ -1332,6 +1497,9 @@ const COMMAND_HANDLERS = {
   set_storage: handleSetStorage,
   error_reporter: handleErrorReporter,
   get_performance_metrics: handleGetPerformanceMetrics,
+  full_page_capture: handleFullPageCapture,
+  pdf_export: handlePdfExport,
+  device_emulate: handleDeviceEmulate,
 };
 
 /**

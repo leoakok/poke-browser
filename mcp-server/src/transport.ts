@@ -42,7 +42,10 @@ export type ExtensionCommand =
   | "get_storage"
   | "set_storage"
   | "error_reporter"
-  | "get_performance_metrics";
+  | "get_performance_metrics"
+  | "full_page_capture"
+  | "pdf_export"
+  | "device_emulate";
 
 export type CommandMessage = {
   type: "command";
