@@ -94,6 +94,72 @@ logAs) {
     }
 }
 const tabIdSchema = z.number().int().positive();
+const BROWSER_GUIDE_MARKDOWN = `## Poke Browser MCP — agent guide
+
+### Available tools (one line each)
+
+- **browser_guide** — This playbook (static Markdown; no parameters).
+- **navigate_to** — Open a URL in a tab; waits for load (short or long timeout).
+- **click_element** — Click via CSS/XPath selector (content script) or viewport **x**/**y** (CDP).
+- **type_text** — Type into an input/textarea/contenteditable (or focused element).
+- **scroll_window** — Scroll the page (selector into view, absolute position, deltas, or direction).
+- **capture_screenshot** — Visible viewport screenshot (PNG/JPEG).
+- **capture_and_upload_screenshot** — Same capture, then multipart POST to \`uploadUrl\` or \`POKE_UPLOAD_URL\`; on failure returns base64 + temp path.
+- **full_page_capture** — Stitched full-page screenshot (slower; fixed headers may repeat).
+- **pdf_export** — Print page to PDF via CDP (\`Page.printToPDF\`).
+- **device_emulate** — CDP device metrics and optional user-agent preset.
+- **managetabs** — List / get active / new / close / switch tabs.
+- **evaluate_js** — Run JavaScript in the page **main world** via the content-script relay (subject to page CSP).
+- **get_dom_snapshot** — Compact DOM tree with tags, roles, aria, text, bounding rects, interactivity.
+- **get_accessibility_tree** — Flat semantic nodes (roles, names, selectors) in reading order.
+- **find_element** — Locate up to 5 nodes by CSS, visible text, ARIA, or XPath; returns bounding rects.
+- **read_page** — Extract content as structured data, plain text, or lightweight Markdown.
+- **wait_for_selector** — Poll until a CSS selector or XPath matches (optional visibility checks).
+- **execute_script** — Async script via **chrome.scripting** (extension main world; bypasses page CSP).
+- **error_reporter** — Recent uncaught errors and unhandled rejections.
+- **get_performance_metrics** — Navigation timing, paint, JS heap (CDP).
+- **get_console_logs** / **clear_console_logs** — Read or clear the content-script console ring buffer.
+- **start_network_capture** / **stop_network_capture** / **get_network_logs** / **clear_network_logs** — CDP network buffering and retrieval.
+- **hover_element** — Hover by selector (synthetic events) or CDP coordinates.
+- **script_inject** — Inject a classic \`<script>\` into the DOM (optional persistent per-origin).
+- **cookie_manager** — Read/write/delete cookies via \`chrome.cookies\`.
+- **fill_form** — Fill multiple fields in one call; optional submit.
+- **get_storage** / **set_storage** — Read/write \`localStorage\` / \`sessionStorage\` (and read cookies).
+
+### Snapshot-then-act (recommended)
+
+1. **Locate** the target with **find_element** or **get_accessibility_tree** (or **get_dom_snapshot** if you need full structure).
+2. Read the returned **bounding rect**: \`x\`, \`y\`, \`width\`, \`height\` (viewport coordinates).
+3. **Click the center** with **click_element** using CDP coordinates: \`x + width/2\`, \`y + height/2\` (not raw guesses).
+
+This avoids brittle hard-coded pixels and matches what the user actually sees.
+
+### Cloudflare / cookie / bot walls
+
+When the tab **title** is **Just a moment...** or the page shows **Verify you are human**:
+
+1. Take a **capture_screenshot** (or **capture_and_upload_screenshot** if you need a hosted image).
+2. Use **find_element** with \`query: "Verify you are human"\`, \`strategy: "text"\` to locate the checkbox/control.
+3. Use its bounding rect and **click_element** at the **center** (CDP \`x\`/\`y\` as above).
+4. **Poll read_page** until the challenge is gone (no wall copy / title normalized). Repeat the locate-and-click loop **up to 8 times** if the page is still blocked.
+
+Do not stop at the wall—drive the verification control explicitly.
+
+### Common errors
+
+- **502 on evaluate_js** — Often transient; **wait ~35s** and **retry**.
+- **execute_script CSP blocks** — Use **find_element** + **click_element** instead of relying on in-page script.
+- **Dropdown closes before find_element runs** — Use a **two-click pattern** (open, then click the option) **without** intermediate queries between clicks.
+
+### Best practices
+
+- Prefer **CSS selectors** and **ARIA-accessible names** over raw pixel coordinates whenever possible; still **read the bounding rect** from **find_element** (or tree snapshot) and **compute the center** for the actual **click_element** call when using CDP coordinates.
+- **evaluate_js** runs in the **page** context (via relay) and is **subject to page CSP**.
+- **execute_script** uses **chrome.scripting** and runs with **extension** privileges—use it when you need behavior equivalent to a content script / extension world and to **bypass page CSP** for allowed operations.
+
+---
+
+*Call **browser_guide** any time for this reference.*`;
 /** Flat ZodObject (required `action`) so MCP tools/list JSON Schema includes `required: ["action"]`. */
 const ManageTabsSchema = z.object({
     action: z.enum(["list", "get_active", "new", "close", "switch"]),
@@ -101,6 +167,13 @@ const ManageTabsSchema = z.object({
     url: z.string().optional(),
 });
 export function registerTools(mcp) {
+    mcp.registerTool("browser_guide", {
+        description: "Return a static Markdown playbook: all tools (one line each), snapshot-then-act clicking, Cloudflare/human-verify flows, common errors, and execute_script vs evaluate_js / CSP notes. No parameters.",
+        inputSchema: {},
+    }, async () => {
+        logToolCall("browser_guide", {});
+        return { content: [{ type: "text", text: BROWSER_GUIDE_MARKDOWN }] };
+    });
     mcp.registerTool("navigate_to", {
         description: "Navigate a tab to a URL (defaults to the active tab). Always waits for chrome.tabs status complete (via onUpdated) before returning tabId, url, and title. waitForLoad false uses a 10s load timeout; omitted/true uses 30s.",
         inputSchema: {
@@ -404,7 +477,7 @@ export function registerTools(mcp) {
         },
     }, async ({ tabId, interactiveOnly }) => callTool("get_accessibility_tree", { tabId, interactiveOnly }, EVALUATE_JS_TIMEOUT_MS));
     mcp.registerTool("find_element", {
-        description: "Find up to 5 elements by CSS selector, visible text, ARIA/title/alt, or XPath. Strategy auto tries css, then text, then aria.",
+        description: "Find up to 5 elements by CSS selector, visible text, ARIA/title/alt, or XPath. Strategy auto tries css, then text, then aria. Prefer this over raw coordinates — always get bounding rect first, then compute center.",
         inputSchema: {
             query: z.string().min(1).describe("Selector string, text snippet, aria substring, or XPath expression"),
             tabId: tabIdSchema.optional(),
