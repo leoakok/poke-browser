@@ -25,6 +25,8 @@ The WebSocket port is configurable on both sides:
 - **Server:** environment variable `POKE_BROWSER_WS_PORT` (default `9009`).
 - **Extension:** popup “WS port” (stored in `chrome.storage.local` as `wsPort`).
 
+For **HTTP MCP** (`--http` / `--tunnel`), the listen port defaults to **8755** or `POKE_BROWSER_MCP_PORT` (also accepts `POKE_BROWSER_PORT` or `POKE_TUNNEL_LOCAL_PORT` as aliases).
+
 ## Load the extension in Chrome
 
 1. Open `chrome://extensions`.
@@ -36,15 +38,30 @@ Grant any permission prompts so tabs and scripting work on the sites you automat
 
 ## Run the MCP server
 
+### Quick start via npx
+
+After this package is published (or when testing a linked install):
+
+```bash
+npx @leokok/poke-browser
+```
+
+That runs the published `poke-browser` binary (stdio MCP by default). Match `POKE_BROWSER_WS_PORT` with the extension popup if you change the WebSocket port.
+
+### From this repository
+
 From the `mcp-server` directory:
 
 ```bash
 cd mcp-server
 npm install
+npm run build
 npm start
 ```
 
-Optional: use a custom port:
+(`npm start` runs `node ./cli.mjs`, same entrypoint as npx.)
+
+Optional: use a custom WebSocket port:
 
 ```bash
 POKE_BROWSER_WS_PORT=9010 npm start
@@ -52,27 +69,37 @@ POKE_BROWSER_WS_PORT=9010 npm start
 
 Match the same port in the extension popup if you change it.
 
-For a compiled run:
+**Poke tunnel (HTTP MCP + `poke tunnel`)** — same pattern as other Poke bridges: Streamable HTTP on localhost, then the Poke CLI tunnels it.
 
 ```bash
+cd mcp-server
 npm run build
+node ./cli.mjs --http
+# or: node ./cli.mjs --tunnel
+```
+
+Use `POKE_BROWSER_MCP_PORT` (default `8755`) if you need a specific HTTP listen port. `--tunnel` runs `npx --yes poke@latest tunnel http://127.0.0.1:<port>/mcp -n "poke-browser"` after the server is up.
+
+For a direct run without the launcher script:
+
+```bash
 npm run serve
 ```
 
-(`serve` runs `node dist/index.js`; build output uses the same env vars.)
+(`serve` runs `node dist/index.js`; build output uses the same env vars and flags.)
 
 ## Connect Cursor / Claude / any MCP client
 
-MCP clients typically spawn your server as a subprocess and talk over **stdin/stdout**. Add a server entry that runs Node with this project’s entrypoint.
+MCP clients typically spawn your server as a subprocess and talk over **stdin/stdout**.
 
-**Cursor** — in MCP settings, add something like:
+**Cursor** — in MCP settings:
 
 ```json
 {
   "mcpServers": {
     "poke-browser": {
       "command": "npx",
-      "args": ["tsx", "/absolute/path/to/poke-labs/poke-browser/mcp-server/index.ts"],
+      "args": ["-y", "@leokok/poke-browser"],
       "env": {
         "POKE_BROWSER_WS_PORT": "9009"
       }
@@ -81,7 +108,7 @@ MCP clients typically spawn your server as a subprocess and talk over **stdin/st
 }
 ```
 
-Adjust the path to match your machine. If you prefer the built output, use `"command": "node"` and `"args": ["/absolute/path/to/poke-browser/mcp-server/dist/index.js"]` after `npm run build`.
+For a local checkout instead of npx, use `"command": "node"` and `"args": ["/absolute/path/to/poke-labs/poke-browser/mcp-server/cli.mjs"]` (run `npm run build` first).
 
 **Claude Desktop** — same idea under `claude_desktop_config.json` `mcpServers`, using `command` / `args` / `env`.
 
