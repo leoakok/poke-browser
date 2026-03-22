@@ -25,22 +25,28 @@ async function callTool(command, payload, timeoutMs = PENDING_REQUEST_TIMEOUT_MS
     }
 }
 const tabIdSchema = z.number().int().positive();
-const manageTabsInputSchema = z.discriminatedUnion("action", [
-    z.object({ action: z.literal("list") }),
-    z.object({ action: z.literal("get_active") }),
-    z.object({
-        action: z.literal("new"),
-        url: z.string().min(1).optional(),
-    }),
-    z.object({
-        action: z.literal("close"),
-        tabId: tabIdSchema,
-    }),
-    z.object({
-        action: z.literal("switch"),
-        tabId: tabIdSchema,
-    }),
-]);
+/**
+ * Single z.object (not z.discriminatedUnion): @modelcontextprotocol/sdk only JSON-serializes
+ * object-shaped schemas for tools/list. A discriminatedUnion has no `.shape`, so clients saw
+ * inputSchema `{}` and could send args that fail union discrimination on the server.
+ */
+const manageTabsInputSchema = z
+    .object({
+    action: z.enum(["list", "get_active", "new", "close", "switch"]),
+    url: z.string().min(1).optional(),
+    tabId: tabIdSchema.optional(),
+})
+    .superRefine((val, ctx) => {
+    if (val.action === "close" || val.action === "switch") {
+        if (val.tabId === undefined) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "tabId is required when action is close or switch",
+                path: ["tabId"],
+            });
+        }
+    }
+});
 export function registerTools(mcp) {
     mcp.registerTool("navigate_to", {
         description: "Navigate a tab to a URL (defaults to the active tab). Optionally wait until the load completes.",
@@ -195,10 +201,6 @@ export function registerTools(mcp) {
                 return callTool("close_tab", { tabId: args.tabId });
             case "switch":
                 return callTool("switch_tab", { tabId: args.tabId });
-            default: {
-                const _exhaustive = args;
-                return toolError(`Unsupported action: ${String(_exhaustive)}`);
-            }
         }
     });
     mcp.registerTool("evaluate_js", {
