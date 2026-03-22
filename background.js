@@ -24,9 +24,7 @@ let bridgePort = null;
 /** @type {"disconnected" | "connecting" | "connected"} */
 let mcpStatus = "disconnected";
 
-const KEEPALIVE_ALARM = "poke_sw_keepalive";
-/** ~25s — chrome.alarms uses minutes; sub-minute delay is supported for chained wake. */
-const KEEPALIVE_DELAY_MIN = 25 / 60;
+const KEEPALIVE_ALARM = "keepAlive";
 
 /** @type {Array<{ ts: number, direction: "in" | "out", summary: string }>} */
 let commandLog = [];
@@ -34,7 +32,13 @@ let commandLog = [];
 function logCommand(direction, summary) {
   commandLog.unshift({ ts: Date.now(), direction, summary });
   if (commandLog.length > LOG_MAX) commandLog.length = LOG_MAX;
-  chrome.runtime.sendMessage({ type: "POKE_LOG_UPDATE" }).catch(() => {});
+  try {
+    if (chrome.runtime?.id) {
+      chrome.runtime.sendMessage({ type: "POKE_LOG_UPDATE" }).catch(() => {});
+    }
+  } catch {
+    /* extension context invalidated */
+  }
 }
 
 async function getWsPort() {
@@ -52,7 +56,13 @@ async function getWsAuthToken() {
 
 function setStatus(next) {
   mcpStatus = next;
-  chrome.runtime.sendMessage({ type: "POKE_STATUS", status: next }).catch(() => {});
+  try {
+    if (chrome.runtime?.id) {
+      chrome.runtime.sendMessage({ type: "POKE_STATUS", status: next }).catch(() => {});
+    }
+  } catch {
+    /* extension context invalidated */
+  }
 }
 
 async function ensureOffscreenDocument() {
@@ -69,7 +79,7 @@ async function ensureOffscreenDocument() {
 }
 
 function scheduleKeepAliveAlarm() {
-  chrome.alarms.create(KEEPALIVE_ALARM, { delayInMinutes: KEEPALIVE_DELAY_MIN });
+  chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 });
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -81,7 +91,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     } catch {
       /* ignore */
     }
-    scheduleKeepAliveAlarm();
   })();
 });
 
@@ -113,10 +122,24 @@ chrome.runtime.onConnect.addListener((port) => {
       });
       return;
     }
+    if (msg && typeof msg === "object" && msg.type === "ws_message" && typeof msg.data === "string") {
+      void handleSocketMessage(msg.data).catch((err) => {
+        logCommand("in", `Handler error: ${String(err)}`);
+      });
+      return;
+    }
     if (msg && typeof msg === "object" && msg.type === "ws_frame" && typeof msg.raw === "string") {
       void handleSocketMessage(msg.raw).catch((err) => {
         logCommand("in", `Handler error: ${String(err)}`);
       });
+      return;
+    }
+    if (msg && typeof msg === "object" && msg.type === "ws_connected") {
+      setStatus("connected");
+      return;
+    }
+    if (msg && typeof msg === "object" && msg.type === "ws_disconnected") {
+      setStatus("disconnected");
       return;
     }
     if (msg && typeof msg === "object" && msg.type === "ws_status" && typeof msg.status === "string") {
@@ -630,11 +653,12 @@ async function handleErrorReporter(payload) {
   const p = asPayload(payload);
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
   const limit = typeof p.limit === "number" ? p.limit : 50;
-  return chrome.tabs
+  const res = await chrome.tabs
     .sendMessage(tabId, { type: "POKE_GET_PAGE_ERRORS", limit })
     .catch((e) => {
       throw new Error(`error_reporter relay failed: ${String(e)}`);
     });
+  return withTabMeta(tabId, res);
 }
 
 /** @param {unknown} payload */
@@ -702,14 +726,14 @@ async function handleGetPerformanceMetrics(payload) {
     const nv = navVal && typeof navVal === "object" ? /** @type {Record<string, unknown>} */ (navVal) : {};
     const pv = paintVal && typeof paintVal === "object" ? /** @type {Record<string, unknown>} */ (paintVal) : {};
 
-    return {
+    return withTabMeta(tabId, {
       domContentLoaded: nv.domContentLoaded ?? null,
       loadEventEnd: nv.loadEventEnd ?? null,
       firstPaint: pv.firstPaint ?? null,
       firstContentfulPaint: pv.firstContentfulPaint ?? null,
       jsHeapUsed: by("JSHeapUsedSize") ?? null,
       jsHeapTotal: by("JSHeapTotalSize") ?? null,
-    };
+    });
   } finally {
     await debuggerDetachForTool(tabId);
   }
@@ -837,7 +861,7 @@ async function handlePdfExport(payload) {
         ? String(/** @type {{ data?: string }} */ (res).data ?? "")
         : "";
     if (!data) throw new Error("pdf_export: printToPDF returned no data");
-    return { success: true, data, mimeType: "application/pdf" };
+    return withTabMeta(tabId, { success: true, data, mimeType: "application/pdf" });
   } finally {
     await debuggerDetachForTool(tabId);
   }
@@ -874,7 +898,7 @@ async function handleDeviceEmulate(payload) {
     if (ua) {
       await debuggerSend(tabId, "Network.setUserAgentOverride", { userAgent: ua });
     }
-    return { success: true };
+    return withTabMeta(tabId, { success: true });
   } finally {
     await debuggerDetachForTool(tabId);
   }
@@ -897,7 +921,7 @@ async function handleEvaluateJs(payload) {
   }).catch((e) => {
     throw new Error(`evaluate_js relay failed: ${String(e)}`);
   });
-  return res;
+  return withTabMeta(tabId, res);
 }
 
 /**
@@ -1228,14 +1252,14 @@ async function handleScriptInject(payload) {
     list.push({ id: injectionId, matchPattern, script, runAt });
     await chrome.storage.local.set({ pokePersistentInjections: list });
     await ensurePersistentLoaderRegistered();
-    return { success: true, injectionId };
+    return withTabMeta(tabId, { success: true, injectionId });
   }
 
   if (runAt === "document_idle") {
     const res = await chrome.tabs.sendMessage(tabId, { type: "POKE_SCRIPT_INJECT", script }).catch((e) => {
       throw new Error(`script_inject relay failed: ${String(e)}`);
     });
-    return { success: Boolean(res && res.success === true) };
+    return withTabMeta(tabId, { success: Boolean(res && res.success === true) });
   }
 
   await chrome.scripting.executeScript({
@@ -1253,7 +1277,7 @@ async function handleScriptInject(payload) {
     },
     args: [script],
   });
-  return { success: true };
+  return withTabMeta(tabId, { success: true });
 }
 
 /** @param {unknown} payload */

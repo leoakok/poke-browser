@@ -1,6 +1,10 @@
 /**
  * MV3 offscreen document: holds the MCP WebSocket so the connection survives
  * service worker suspension (service workers cannot keep long-lived sockets).
+ *
+ * MCP outbound frames use `chrome.runtime.connect` + `port.postMessage` (handleFromBg listens for
+ * `ws_send`). There is no `chrome.runtime.onMessage` path for those — the long-lived Port is the
+ * supported bridge when the service worker may suspend.
  */
 
 /** Offscreen documents cannot use chrome.storage; port comes from the document URL (set by background). */
@@ -28,9 +32,10 @@ let bgPort = null;
 
 function postToBg(msg) {
   try {
+    if (!chrome.runtime?.id) return;
     bgPort?.postMessage(msg);
   } catch {
-    /* ignore */
+    /* extension context invalidated */
   }
 }
 
@@ -57,7 +62,7 @@ function scheduleReconnectAfterClose(closeCode = 0) {
   if (wsReconnectCycles >= WS_MAX_RETRIES) {
     console.error("[poke-browser offscreen] max WebSocket reconnect attempts reached");
     notifyLog("out", `WebSocket: gave up after ${WS_MAX_RETRIES} failed reconnects`);
-    notifyStatus("disconnected");
+    postToBg({ type: "ws_disconnected", code: 0 });
     return;
   }
   let delay = wsRetryDelayMs;
@@ -92,7 +97,7 @@ function connectMcpSocket() {
   try {
     socket = new WebSocket(url);
   } catch (e) {
-    notifyStatus("disconnected");
+    postToBg({ type: "ws_disconnected", code: 0 });
     notifyLog("out", `WebSocket construct failed: ${String(e)}`);
     scheduleReconnectAfterClose();
     return;
@@ -100,7 +105,7 @@ function connectMcpSocket() {
 
   socket.addEventListener("open", () => {
     resetWebSocketBackoff();
-    notifyStatus("connected");
+    postToBg({ type: "ws_connected" });
     notifyLog("out", `Connected to MCP WebSocket ${url}`);
     postToBg({ type: "request_hello_credentials" });
   });
@@ -108,11 +113,11 @@ function connectMcpSocket() {
   socket.addEventListener("message", (event) => {
     const raw = String(event.data);
     console.log("[poke-browser offscreen] From MCP (first 200 chars):", raw.slice(0, 200));
-    postToBg({ type: "ws_frame", raw });
+    postToBg({ type: "ws_message", data: raw });
   });
 
   socket.addEventListener("close", (event) => {
-    notifyStatus("disconnected");
+    postToBg({ type: "ws_disconnected", code: event.code });
     console.error(
       "[poke-browser offscreen] WebSocket CLOSED, code:",
       event.code,
@@ -218,6 +223,7 @@ function handleFromBg(msg) {
 
 function attachBridgePort() {
   if (bgPort) return;
+  if (!chrome.runtime?.id) return;
   bgPort = chrome.runtime.connect({ name: "POKE_WS_BRIDGE" });
   bgPort.onMessage.addListener(handleFromBg);
   bgPort.onDisconnect.addListener(() => {

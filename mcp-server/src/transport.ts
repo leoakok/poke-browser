@@ -268,6 +268,8 @@ export async function startExtensionWebSocketServer(
   /** Sockets that completed `hello`; used to promote the MCP bridge when the active client drops. */
   const authenticatedClients = new Set<WebSocket>();
 
+  // Exactly one `connection` listener on this `WebSocketServer` instance; duplicate `startExtensionWebSocketServer` for the same port is a no-op above.
+
   wss.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       log(`[poke-browser] Port ${port} is already in use.`);
@@ -464,6 +466,7 @@ export async function startExtensionWebSocketServer(
     ws.on("error", (err) => {
       console.error("[poke-browser-mcp] WebSocket socket error:", err.message);
       stopPing();
+      trackedClients.delete(ws);
     });
   });
 
