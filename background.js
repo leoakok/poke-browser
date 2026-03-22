@@ -2,9 +2,6 @@
 
 const DEFAULT_WS_PORT = 9009;
 const LOG_MAX = 50;
-const WS_INITIAL_RETRY_MS = 1000;
-const WS_MAX_RETRY_MS = 30000;
-const WS_MAX_RETRIES = 20;
 const NAVIGATE_WAIT_MS = 30_000;
 const MAX_NET_PER_TAB = 200;
 
@@ -17,19 +14,19 @@ const networkCaptureTabs = new Set();
  */
 const networkStateByTab = new Map();
 
-/** @type {WebSocket | null} */
-let socket = null;
-/** When true, the next `close` event does not schedule a reconnect (port change / manual reconnect). */
-let suppressReconnectOnce = false;
+/**
+ * Long-lived port from offscreen.js (holds WebSocket). MV3 service workers cannot keep a socket
+ * across suspension; the offscreen document owns the connection.
+ * @type {chrome.runtime.Port | null}
+ */
+let bridgePort = null;
 
-/** @type {ReturnType<typeof setTimeout> | null} */
-let reconnectTimer = null;
-/** Next delay (ms) after a connection close (doubles, capped); reset on successful open. */
-let wsRetryDelayMs = WS_INITIAL_RETRY_MS;
-/** Scheduled reconnects after close without a successful open in between; reset on open. */
-let wsReconnectCycles = 0;
 /** @type {"disconnected" | "connecting" | "connected"} */
 let mcpStatus = "disconnected";
+
+const KEEPALIVE_ALARM = "poke_sw_keepalive";
+/** ~25s — chrome.alarms uses minutes; sub-minute delay is supported for chained wake. */
+const KEEPALIVE_DELAY_MIN = 25 / 60;
 
 /** @type {Array<{ ts: number, direction: "in" | "out", summary: string }>} */
 let commandLog = [];
@@ -58,144 +55,82 @@ function setStatus(next) {
   chrome.runtime.sendMessage({ type: "POKE_STATUS", status: next }).catch(() => {});
 }
 
-function clearReconnectTimer() {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-  }
-}
-
-/**
- * @param {number} [closeCode] WebSocket close code from the `close` event (0 if unknown).
- */
-function scheduleReconnectAfterClose(closeCode = 0) {
-  clearReconnectTimer();
-  if (wsReconnectCycles >= WS_MAX_RETRIES) {
-    console.error("poke-browser: max WebSocket reconnect attempts reached; not retrying further");
-    logCommand("out", `WebSocket: gave up after ${WS_MAX_RETRIES} failed reconnects`);
-    setStatus("disconnected");
-    return;
-  }
-  let delay = wsRetryDelayMs;
-  /** Code 4000 was historically used for "replaced" closes; wait ≥5s before retry to avoid tight reconnect loops. */
-  if (closeCode === 4000) {
-    delay = Math.max(delay, 5000);
-  }
-  wsRetryDelayMs = Math.min(wsRetryDelayMs * 2, WS_MAX_RETRY_MS);
-  wsReconnectCycles += 1;
-  console.log("[poke-browser ext] Retrying WebSocket in", delay, "ms (cycle", wsReconnectCycles, "/", WS_MAX_RETRIES, ")");
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectWebSocket();
-  }, delay);
-  logCommand("out", `WebSocket: reconnect in ${delay}ms (${wsReconnectCycles}/${WS_MAX_RETRIES})`);
-}
-
-function resetWebSocketBackoff() {
-  clearReconnectTimer();
-  wsRetryDelayMs = WS_INITIAL_RETRY_MS;
-  wsReconnectCycles = 0;
-}
-
-function connectWebSocket() {
-  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
-    console.log("[poke-browser ext] connectWebSocket skipped (socket already open/connecting)");
-    return;
-  }
-
-  setStatus("connecting");
-  getWsPort().then((port) => {
-    const url = `ws://127.0.0.1:${port}`;
-    console.log(
-      "[poke-browser ext] Attempting WebSocket connection to",
-      url,
-      "| reconnect cycles completed:",
-      wsReconnectCycles,
-      "| next backoff ms:",
-      wsRetryDelayMs,
-    );
-    try {
-      socket = new WebSocket(url);
-    } catch (e) {
-      setStatus("disconnected");
-      logCommand("out", `WebSocket construct failed: ${String(e)}`);
-      scheduleReconnectAfterClose();
-      return;
-    }
-
-    socket.addEventListener("open", () => {
-      resetWebSocketBackoff();
-      setStatus("connected");
-      console.log("[poke-browser ext] WebSocket OPENED", url);
-      logCommand("out", `Connected to MCP WebSocket ${url}`);
-      void (async () => {
-        const token = await getWsAuthToken();
-        const hello =
-          token.length > 0
-            ? {
-                type: "hello",
-                token,
-                client: "poke-browser-extension",
-                version: chrome.runtime.getManifest().version,
-              }
-            : {
-                type: "hello",
-                client: "poke-browser-extension",
-                version: chrome.runtime.getManifest().version,
-              };
-        try {
-          socket?.send(JSON.stringify(hello));
-        } catch (_) {
-          /* ignore */
-        }
-      })();
-    });
-
-    socket.addEventListener("message", (event) => {
-      const raw = String(event.data);
-      console.log("[poke-browser ext] Message from MCP (first 200 chars):", raw.slice(0, 200));
-      handleSocketMessage(raw).catch((err) => {
-        logCommand("in", `Handler error: ${String(err)}`);
-      });
-    });
-
-    socket.addEventListener("close", (event) => {
-      setStatus("disconnected");
-      console.error(
-        "[poke-browser ext] WebSocket CLOSED, code:",
-        event.code,
-        "reason:",
-        event.reason,
-        "wasClean:",
-        event.wasClean,
-      );
-      logCommand("out", "WebSocket closed");
-      socket = null;
-      if (suppressReconnectOnce) {
-        suppressReconnectOnce = false;
-        return;
-      }
-      if (event.code === 1000 || event.code === 1001) {
-        console.error("[poke-browser ext] Clean close, not reconnecting");
-        return;
-      }
-      scheduleReconnectAfterClose(event.code);
-    });
-
-    socket.addEventListener("error", (event) => {
-      console.error("[poke-browser ext] WebSocket ERROR event:", event);
-      logCommand("out", "WebSocket error (see close for reconnect)");
-    });
+async function ensureOffscreenDocument() {
+  const has = await chrome.offscreen.hasDocument();
+  if (has) return;
+  await chrome.offscreen.createDocument({
+    url: chrome.runtime.getURL("offscreen.html"),
+    reasons: ["WEBSOCKET"],
+    justification:
+      "Maintain a persistent WebSocket to the poke-browser MCP server; MV3 service workers cannot hold long-lived sockets.",
   });
 }
+
+function scheduleKeepAliveAlarm() {
+  chrome.alarms.create(KEEPALIVE_ALARM, { delayInMinutes: KEEPALIVE_DELAY_MIN });
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== KEEPALIVE_ALARM) return;
+  void (async () => {
+    await ensureOffscreenDocument();
+    try {
+      bridgePort?.postMessage({ type: "sw_wake" });
+    } catch {
+      /* ignore */
+    }
+    scheduleKeepAliveAlarm();
+  })();
+});
+
+async function ensureOffscreenAndSchedule() {
+  try {
+    await ensureOffscreenDocument();
+  } catch (e) {
+    console.error("[poke-browser ext] offscreen create failed:", e);
+  }
+  scheduleKeepAliveAlarm();
+}
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== "POKE_WS_BRIDGE") return;
+  bridgePort = port;
+  console.log("[poke-browser ext] Offscreen bridge port connected");
+  port.onMessage.addListener((msg) => {
+    if (msg && typeof msg === "object" && msg.type === "ws_frame" && typeof msg.raw === "string") {
+      void handleSocketMessage(msg.raw).catch((err) => {
+        logCommand("in", `Handler error: ${String(err)}`);
+      });
+      return;
+    }
+    if (msg && typeof msg === "object" && msg.type === "ws_status" && typeof msg.status === "string") {
+      setStatus(msg.status);
+      return;
+    }
+    if (
+      msg &&
+      typeof msg === "object" &&
+      msg.type === "ws_log" &&
+      typeof msg.direction === "string" &&
+      typeof msg.summary === "string"
+    ) {
+      logCommand(msg.direction, msg.summary);
+    }
+  });
+  port.onDisconnect.addListener(() => {
+    if (bridgePort === port) bridgePort = null;
+    console.error("[poke-browser ext] Offscreen bridge port disconnected");
+    setStatus("disconnected");
+  });
+});
 
 /**
  * @param {unknown} data
  */
 function safeSend(data) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  if (!bridgePort) return false;
   try {
-    socket.send(JSON.stringify(data));
+    bridgePort.postMessage({ type: "ws_send", payload: data });
     return true;
   } catch {
     return false;
@@ -1583,13 +1518,14 @@ chrome.runtime.onInstalled.addListener(() => {
       chrome.storage.local.set({ wsPort: DEFAULT_WS_PORT });
     }
   });
+  void ensureOffscreenAndSchedule();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  connectWebSocket();
+  void ensureOffscreenAndSchedule();
 });
 
-connectWebSocket();
+void ensureOffscreenAndSchedule();
 
 /** @type {Record<string, (message: unknown, sendResponse: (r: unknown) => void) => boolean | void>} */
 const RUNTIME_HANDLERS = {
@@ -1608,18 +1544,13 @@ const RUNTIME_HANDLERS = {
   POKE_SET_TOKEN: (message, sendResponse) => {
     const m = /** @type {{ token?: unknown }} */ (message);
     const token = typeof m.token === "string" ? m.token : "";
-    void chrome.storage.local.set({ wsAuthToken: token }).then(() => {
-      resetWebSocketBackoff();
-      if (socket) {
-        suppressReconnectOnce = true;
-        try {
-          socket.close();
-        } catch (_) {
-          suppressReconnectOnce = false;
-        }
-        socket = null;
+    void chrome.storage.local.set({ wsAuthToken: token }).then(async () => {
+      await ensureOffscreenAndSchedule();
+      try {
+        bridgePort?.postMessage({ type: "reconnect" });
+      } catch {
+        /* ignore */
       }
-      connectWebSocket();
       sendResponse({ ok: true });
     });
     return true;
@@ -1631,36 +1562,27 @@ const RUNTIME_HANDLERS = {
       sendResponse({ ok: false, error: "Invalid port" });
       return false;
     }
-    void chrome.storage.local.set({ wsPort: next }).then(() => {
-      resetWebSocketBackoff();
-      if (socket) {
-        suppressReconnectOnce = true;
-        try {
-          socket.close();
-        } catch (_) {
-          suppressReconnectOnce = false;
-        }
-        socket = null;
+    void chrome.storage.local.set({ wsPort: next }).then(async () => {
+      await ensureOffscreenAndSchedule();
+      try {
+        bridgePort?.postMessage({ type: "reconnect" });
+      } catch {
+        /* ignore */
       }
-      connectWebSocket();
       sendResponse({ ok: true, port: next });
     });
     return true;
   },
   POKE_RECONNECT: (_message, sendResponse) => {
-    resetWebSocketBackoff();
-    if (socket) {
-      suppressReconnectOnce = true;
+    void ensureOffscreenAndSchedule().then(() => {
       try {
-        socket.close();
-      } catch (_) {
-        suppressReconnectOnce = false;
+        bridgePort?.postMessage({ type: "reconnect" });
+      } catch {
+        /* ignore */
       }
-      socket = null;
-    }
-    connectWebSocket();
-    sendResponse({ ok: true });
-    return false;
+      sendResponse({ ok: true });
+    });
+    return true;
   },
 };
 

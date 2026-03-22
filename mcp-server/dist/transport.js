@@ -281,6 +281,15 @@ export async function startExtensionWebSocketServer(port, b, options = {}) {
                     }
                     return;
                 }
+                if (isRecord(msg) && msg.type === "ping") {
+                    try {
+                        ws.send(JSON.stringify({ type: "pong" }));
+                    }
+                    catch {
+                        /* ignore */
+                    }
+                    return;
+                }
                 if (!isRecord(msg) || msg.type !== "hello") {
                     try {
                         ws.close(1008, "hello required");
@@ -320,6 +329,23 @@ export async function startExtensionWebSocketServer(port, b, options = {}) {
                 console.error(authRequired
                     ? "[poke-browser-mcp] Extension WebSocket client authenticated"
                     : "[poke-browser-mcp] Extension WebSocket client connected (dev mode, no token check)");
+                return;
+            }
+            let appPing;
+            try {
+                appPing = JSON.parse(raw);
+            }
+            catch {
+                b.handleMessage(raw);
+                return;
+            }
+            if (isRecord(appPing) && appPing.type === "ping") {
+                try {
+                    ws.send(JSON.stringify({ type: "pong" }));
+                }
+                catch {
+                    /* ignore */
+                }
                 return;
             }
             b.handleMessage(raw);

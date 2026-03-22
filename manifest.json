@@ -9,7 +9,9 @@
     "scripting",
     "debugger",
     "storage",
-    "cookies"
+    "cookies",
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": ["<all_urls>"],
   "background": {
