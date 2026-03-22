@@ -619,6 +619,96 @@ async function handleScreenshot(payload) {
 }
 
 /** @param {unknown} payload */
+async function handleErrorReporter(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  const limit = typeof p.limit === "number" ? p.limit : 50;
+  return chrome.tabs
+    .sendMessage(tabId, { type: "POKE_GET_PAGE_ERRORS", limit })
+    .catch((e) => {
+      throw new Error(`error_reporter relay failed: ${String(e)}`);
+    });
+}
+
+/** @param {unknown} payload */
+async function handleGetPerformanceMetrics(payload) {
+  const p = asPayload(payload);
+  const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
+  await debuggerAttachForTool(tabId);
+  try {
+    const rawMetrics = await debuggerSendWithResult(tabId, "Performance.getMetrics", {});
+    const metricsArr = Array.isArray(rawMetrics)
+      ? rawMetrics
+      : rawMetrics && typeof rawMetrics === "object" && "metrics" in rawMetrics
+        ? /** @type {{ metrics?: unknown }} */ (rawMetrics).metrics
+        : null;
+    /**
+     * @param {string} name
+     */
+    const by = (name) => {
+      if (!Array.isArray(metricsArr)) return undefined;
+      const row = metricsArr.find(
+        (x) => x && typeof x === "object" && /** @type {{ name?: string }} */ (x).name === name,
+      );
+      return row && typeof /** @type {{ value?: number }} */ (row).value === "number"
+        ? /** @type {{ value: number }} */ (row).value
+        : undefined;
+    };
+
+    const navExpr = `(() => {
+      const t = performance.timing;
+      const ns = t.navigationStart || 0;
+      if (!ns) return { domContentLoaded: null, loadEventEnd: null };
+      return {
+        domContentLoaded: t.domContentLoadedEventEnd > 0 ? t.domContentLoadedEventEnd - ns : null,
+        loadEventEnd: t.loadEventEnd > 0 ? t.loadEventEnd - ns : null,
+      };
+    })()`;
+    const navRes = await debuggerSendWithResult(tabId, "Runtime.evaluate", {
+      expression: navExpr,
+      returnByValue: true,
+    });
+    const navVal =
+      navRes && typeof navRes === "object" && "result" in navRes
+        ? /** @type {{ result?: { value?: unknown } }} */ (navRes).result?.value
+        : undefined;
+
+    const paintExpr = `(() => {
+      const entries = performance.getEntriesByType("paint");
+      let firstPaint = null;
+      let firstContentfulPaint = null;
+      for (const e of entries) {
+        if (e.name === "first-paint") firstPaint = e.startTime;
+        if (e.name === "first-contentful-paint") firstContentfulPaint = e.startTime;
+      }
+      return { firstPaint, firstContentfulPaint };
+    })()`;
+    const paintRes = await debuggerSendWithResult(tabId, "Runtime.evaluate", {
+      expression: paintExpr,
+      returnByValue: true,
+    });
+    const paintVal =
+      paintRes && typeof paintRes === "object" && "result" in paintRes
+        ? /** @type {{ result?: { value?: unknown } }} */ (paintRes).result?.value
+        : undefined;
+
+    const nv = navVal && typeof navVal === "object" ? /** @type {Record<string, unknown>} */ (navVal) : {};
+    const pv = paintVal && typeof paintVal === "object" ? /** @type {Record<string, unknown>} */ (paintVal) : {};
+
+    return {
+      domContentLoaded: nv.domContentLoaded ?? null,
+      loadEventEnd: nv.loadEventEnd ?? null,
+      firstPaint: pv.firstPaint ?? null,
+      firstContentfulPaint: pv.firstContentfulPaint ?? null,
+      jsHeapUsed: by("JSHeapUsedSize") ?? null,
+      jsHeapTotal: by("JSHeapTotalSize") ?? null,
+    };
+  } finally {
+    await debuggerDetachForTool(tabId);
+  }
+}
+
+/** @param {unknown} payload */
 async function handleEvaluateJs(payload) {
   const p = asPayload(payload);
   const code = typeof p.code === "string" ? p.code : "";
@@ -1240,6 +1330,8 @@ const COMMAND_HANDLERS = {
   fill_form: handleFillForm,
   get_storage: handleGetStorage,
   set_storage: handleSetStorage,
+  error_reporter: handleErrorReporter,
+  get_performance_metrics: handleGetPerformanceMetrics,
 };
 
 /**

@@ -348,6 +348,31 @@ export function registerTools(mcp: McpServer): void {
   );
 
   mcp.registerTool(
+    "error_reporter",
+    {
+      description:
+        "Return the last N uncaught page errors and unhandled promise rejections (separate from console logs): message, stack, filename, line/column, timestamp.",
+      inputSchema: {
+        tabId: tabIdSchema.optional(),
+        limit: z.number().int().positive().max(200).optional().describe("Max entries (default 50)"),
+      },
+    },
+    async ({ tabId, limit }) => callTool("error_reporter", { tabId, limit: limit ?? 50 })
+  );
+
+  mcp.registerTool(
+    "get_performance_metrics",
+    {
+      description:
+        "Navigation timing (domContentLoaded, loadEventEnd), paint timings (firstPaint, firstContentfulPaint), and JS heap from CDP Performance.getMetrics (requires debugger attach briefly).",
+      inputSchema: {
+        tabId: tabIdSchema.optional(),
+      },
+    },
+    async ({ tabId }) => callTool("get_performance_metrics", { tabId }, EVALUATE_JS_TIMEOUT_MS)
+  );
+
+  mcp.registerTool(
     "get_console_logs",
     {
       description:

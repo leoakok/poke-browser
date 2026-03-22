@@ -3,9 +3,57 @@
  */
 
 const CONSOLE_RING_MAX = 500;
+const PAGE_ERROR_RING_MAX = 200;
 
 /** @type {Array<{ level: string; message: string; timestamp: number; stack?: string }>} */
 let consoleRing = [];
+
+/**
+ * Uncaught errors and unhandled rejections (separate from console ring).
+ * @type {Array<{ kind: string; message: string; stack?: string; filename?: string; lineno?: number; colno?: number; timestamp: number }>}
+ */
+let pageErrorRing = [];
+
+/**
+ * @param {{ kind: string; message: string; stack?: string; filename?: string; lineno?: number; colno?: number; timestamp: number }} entry
+ */
+function pushPageError(entry) {
+  pageErrorRing.push(entry);
+  while (pageErrorRing.length > PAGE_ERROR_RING_MAX) pageErrorRing.shift();
+}
+
+window.addEventListener("error", (ev) => {
+  try {
+    pushPageError({
+      kind: "error",
+      message: ev.message || String(ev.error || "error"),
+      stack: ev.error instanceof Error ? ev.error.stack : undefined,
+      filename: ev.filename,
+      lineno: ev.lineno,
+      colno: ev.colno,
+      timestamp: Date.now(),
+    });
+  } catch {
+    /* ignore */
+  }
+});
+
+window.addEventListener("unhandledrejection", (ev) => {
+  try {
+    const reason = ev.reason;
+    const message =
+      reason instanceof Error ? reason.message : typeof reason === "string" ? reason : String(reason);
+    const stack = reason instanceof Error ? reason.stack : undefined;
+    pushPageError({
+      kind: "unhandledrejection",
+      message,
+      stack,
+      timestamp: Date.now(),
+    });
+  } catch {
+    /* ignore */
+  }
+});
 
 /**
  * @param {unknown} a
@@ -932,6 +980,17 @@ function handleClearConsoleLogs(_message, sendResponse) {
  * @param {unknown} message
  * @param {(r: unknown) => void} sendResponse
  */
+function handleGetPageErrors(message, sendResponse) {
+  const m = /** @type {{ limit?: number }} */ (message);
+  const limit = typeof m.limit === "number" ? Math.min(200, Math.max(1, m.limit)) : 50;
+  const sliced = pageErrorRing.slice(-limit);
+  sendResponse({ errors: sliced, count: sliced.length });
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
 function handleHoverElement(message, sendResponse) {
   const m = /** @type {{ selector?: string }} */ (message);
   const selector = typeof m.selector === "string" ? m.selector : "";
@@ -1208,6 +1267,7 @@ const MESSAGE_HANDLERS = {
   POKE_WAIT_FOR_SELECTOR: handleWaitForSelector,
   POKE_GET_CONSOLE_LOGS: handleGetConsoleLogs,
   POKE_CLEAR_CONSOLE_LOGS: handleClearConsoleLogs,
+  POKE_GET_PAGE_ERRORS: handleGetPageErrors,
   POKE_HOVER_ELEMENT: handleHoverElement,
   POKE_SCRIPT_INJECT: handleScriptInject,
   POKE_FILL_FORM: handleFillForm,

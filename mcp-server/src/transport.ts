@@ -40,7 +40,9 @@ export type ExtensionCommand =
   | "cookie_manager"
   | "fill_form"
   | "get_storage"
-  | "set_storage";
+  | "set_storage"
+  | "error_reporter"
+  | "get_performance_metrics";
 
 export type CommandMessage = {
   type: "command";
