@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
 import { WebSocketServer, WebSocket } from "ws";
 const WS_PING_INTERVAL_MS = 20_000;
 const WS_PONG_DEADLINE_MS = 30_000;
@@ -112,6 +111,20 @@ export class ExtensionBridge {
     }
 }
 export const bridge = new ExtensionBridge();
+function waitForWebSocketListening(wss) {
+    return new Promise((resolve, reject) => {
+        const onListen = () => {
+            wss.off("error", onErr);
+            resolve();
+        };
+        const onErr = (err) => {
+            wss.off("listening", onListen);
+            reject(err);
+        };
+        wss.once("listening", onListen);
+        wss.once("error", onErr);
+    });
+}
 /**
  * Binds the extension WebSocket server and resolves only after the port is listening
  * (avoids ERR_CONNECTION_REFUSED races with early client connects).
@@ -182,7 +195,7 @@ export async function startExtensionWebSocketServer(port, b) {
             console.error("[poke-browser-mcp] WebSocket socket error:", err.message);
         });
     });
-    await once(wss, "listening");
+    await waitForWebSocketListening(wss);
     extensionWebSocketServer = wss;
     console.error(`[poke-browser-mcp] WebSocket listening on ws://127.0.0.1:${port}`);
     console.error("[poke-browser-mcp] Load the poke-browser extension and keep this process running.");

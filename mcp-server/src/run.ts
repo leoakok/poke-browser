@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { PassThrough } from "node:stream";
 import type { Request, Response } from "express";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -67,10 +68,31 @@ export function parseArgs(argv: string[]): {
 
 async function runStdio(): Promise<void> {
   const WS_PORT = readPort();
-  await startExtensionWebSocketServer(WS_PORT, bridge);
+  try {
+    await startExtensionWebSocketServer(WS_PORT, bridge);
+  } catch (err) {
+    console.error(
+      "[poke-browser-mcp] WebSocket server failed to bind (is another poke-browser or process using the port?):",
+      err,
+    );
+    process.exit(1);
+  }
+
+  /**
+   * When stdin is a TTY or an MCP client pipe, data flows into MCP.
+   * When stdin hits EOF (e.g. `node dist/index.js &` with closed stdin), piping with `end: false`
+   * keeps the PassThrough readable open so StdioServerTransport is not torn down and the process
+   * stays alive for the WebSocket server + Chrome extension.
+   */
+  process.stdin.resume();
+  const mcpStdin = new PassThrough();
+  process.stdin.pipe(mcpStdin, { end: false });
+  process.stdin.on("error", (e: NodeJS.ErrnoException) => {
+    console.error("[poke-browser-mcp] stdin error (WebSocket bridge keeps running):", e.message);
+  });
 
   const mcp = createPokeBrowserMcpServer();
-  const transport = new StdioServerTransport();
+  const transport = new StdioServerTransport(mcpStdin, process.stdout);
   await mcp.connect(transport);
   console.error(
     "[poke-browser-mcp] MCP stdio transport connected (ready for MCP clients)",
@@ -82,7 +104,12 @@ async function runHttp(opts: {
   spawnTunnel: boolean;
 }): Promise<void> {
   const WS_PORT = readPort();
-  await startExtensionWebSocketServer(WS_PORT, bridge);
+  try {
+    await startExtensionWebSocketServer(WS_PORT, bridge);
+  } catch (err) {
+    console.error("[poke-browser-mcp] WebSocket server failed to bind:", err);
+    process.exit(1);
+  }
 
   const app = createMcpExpressApp();
 

@@ -71,6 +71,7 @@ function scheduleReconnectAfterClose() {
   const delay = wsRetryDelayMs;
   wsRetryDelayMs = Math.min(wsRetryDelayMs * 2, WS_MAX_RETRY_MS);
   wsReconnectCycles += 1;
+  console.log("[poke-browser ext] Retrying WebSocket in", delay, "ms (cycle", wsReconnectCycles, "/", WS_MAX_RETRIES, ")");
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connectWebSocket();
@@ -86,12 +87,21 @@ function resetWebSocketBackoff() {
 
 function connectWebSocket() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+    console.log("[poke-browser ext] connectWebSocket skipped (socket already open/connecting)");
     return;
   }
 
   setStatus("connecting");
   getWsPort().then((port) => {
     const url = `ws://127.0.0.1:${port}`;
+    console.log(
+      "[poke-browser ext] Attempting WebSocket connection to",
+      url,
+      "| reconnect cycles completed:",
+      wsReconnectCycles,
+      "| next backoff ms:",
+      wsRetryDelayMs,
+    );
     try {
       socket = new WebSocket(url);
     } catch (e) {
@@ -104,6 +114,7 @@ function connectWebSocket() {
     socket.addEventListener("open", () => {
       resetWebSocketBackoff();
       setStatus("connected");
+      console.log("[poke-browser ext] WebSocket OPENED", url);
       logCommand("out", `Connected to MCP WebSocket ${url}`);
       try {
         socket?.send(
@@ -119,13 +130,23 @@ function connectWebSocket() {
     });
 
     socket.addEventListener("message", (event) => {
-      handleSocketMessage(String(event.data)).catch((err) => {
+      const raw = String(event.data);
+      console.log("[poke-browser ext] Message from MCP (first 200 chars):", raw.slice(0, 200));
+      handleSocketMessage(raw).catch((err) => {
         logCommand("in", `Handler error: ${String(err)}`);
       });
     });
 
-    socket.addEventListener("close", () => {
+    socket.addEventListener("close", (event) => {
       setStatus("disconnected");
+      console.log(
+        "[poke-browser ext] WebSocket CLOSED code:",
+        event.code,
+        "reason:",
+        event.reason,
+        "wasClean:",
+        event.wasClean,
+      );
       logCommand("out", "WebSocket closed");
       socket = null;
       if (suppressReconnectOnce) {
@@ -135,7 +156,8 @@ function connectWebSocket() {
       scheduleReconnectAfterClose();
     });
 
-    socket.addEventListener("error", () => {
+    socket.addEventListener("error", (event) => {
+      console.error("[poke-browser ext] WebSocket ERROR event:", event);
       logCommand("out", "WebSocket error (see close for reconnect)");
     });
   });

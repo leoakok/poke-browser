@@ -1,3 +1,6 @@
 import { main } from "./run.js";
 
-await main();
+main().catch((err: unknown) => {
+  console.error("[poke-browser-mcp] Fatal startup error:", err);
+  process.exit(1);
+});
