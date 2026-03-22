@@ -103,14 +103,14 @@ async function setupOffscreen() {
           justification:
             "Maintain persistent WebSocket connection to poke-browser MCP server for browser automation",
         });
-        console.error("[poke-browser ext] Offscreen document created");
+        console.log("[poke-browser ext] Offscreen document created");
       } catch (err) {
         const msg =
           err && typeof err === "object" && "message" in err
             ? String(/** @type {{ message?: string }} */ (err).message)
             : String(err);
         if (msg.includes("single offscreen document") || msg.includes("already exists")) {
-          console.error(
+          console.log(
             "[poke-browser ext] Offscreen already exists (concurrent creation), ignoring",
           );
         } else {
@@ -210,7 +210,7 @@ chrome.runtime.onConnect.addListener((port) => {
   });
   port.onDisconnect.addListener(() => {
     if (bridgePort === port) bridgePort = null;
-    console.error("[poke-browser ext] Offscreen bridge port disconnected");
+    console.log("[poke-browser ext] Offscreen bridge port disconnected");
     setStatus("disconnected");
   });
 });

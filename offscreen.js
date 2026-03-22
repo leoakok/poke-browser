@@ -118,7 +118,7 @@ function connectMcpSocket() {
 
   socket.addEventListener("close", (event) => {
     postToBg({ type: "ws_disconnected", code: event.code });
-    console.error(
+    console.log(
       "[poke-browser offscreen] WebSocket CLOSED, code:",
       event.code,
       "reason:",
@@ -133,7 +133,7 @@ function connectMcpSocket() {
       return;
     }
     if (event.code === 1000 || event.code === 1001) {
-      console.error("[poke-browser offscreen] Clean close, not reconnecting");
+      console.log("[poke-browser offscreen] Clean close, not reconnecting");
       return;
     }
     scheduleReconnectAfterClose(event.code);
