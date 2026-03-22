@@ -1,6 +1,7 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { log } from "./logger.js";
 import {
   bridge,
   EVALUATE_JS_TIMEOUT_MS,
@@ -11,6 +12,17 @@ import {
   RateLimitError,
   type ExtensionCommand,
 } from "./transport.js";
+
+/** Stderr-only; stdout is MCP JSON-RPC. */
+function logToolCall(name: string, args: unknown): void {
+  let payload: string;
+  try {
+    payload = JSON.stringify(args);
+  } catch {
+    payload = String(args);
+  }
+  log(`[poke-browser-mcp] tool call: ${name}`, payload);
+}
 
 export function toolText(data: unknown): CallToolResult {
   return {
@@ -25,8 +37,16 @@ export function toolError(text: string): CallToolResult {
 async function callTool(
   command: ExtensionCommand,
   payload: unknown,
-  timeoutMs: number = PENDING_REQUEST_TIMEOUT_MS
+  timeoutMs: number = PENDING_REQUEST_TIMEOUT_MS,
+  /**
+   * MCP tool name when it differs from the bridge `command`, or `false` to skip logging
+   * (e.g. managetabs logs the full args once at the handler).
+   */
+  logAs?: string | false
 ): Promise<CallToolResult> {
+  if (logAs !== false) {
+    logToolCall(typeof logAs === "string" ? logAs : command, payload);
+  }
   if (!bridge.isReady()) {
     return toolError(extensionBridgeDisconnectedMessage());
   }
@@ -142,6 +162,7 @@ export function registerTools(mcp: McpServer): void {
       },
     },
     async ({ tabId, format, quality }): Promise<CallToolResult> => {
+      logToolCall("capture_screenshot", { tabId, format, quality });
       if (!bridge.isReady()) {
         return toolError(extensionBridgeDisconnectedMessage());
       }
@@ -195,6 +216,7 @@ export function registerTools(mcp: McpServer): void {
       },
     },
     async ({ tabId, format, quality }): Promise<CallToolResult> => {
+      logToolCall("full_page_capture", { tabId, format, quality });
       if (!bridge.isReady()) {
         return toolError(extensionBridgeDisconnectedMessage());
       }
@@ -277,6 +299,7 @@ export function registerTools(mcp: McpServer): void {
       inputSchema: ManageTabsSchema,
     },
     async (args): Promise<CallToolResult> => {
+      logToolCall("managetabs", args);
       if (
         (args.action === "close" || args.action === "switch") &&
         (args.tabId === undefined || !Number.isFinite(args.tabId))
@@ -285,15 +308,25 @@ export function registerTools(mcp: McpServer): void {
       }
       switch (args.action) {
         case "list":
-          return callTool("list_tabs", {});
+          return callTool("list_tabs", {}, PENDING_REQUEST_TIMEOUT_MS, false);
         case "get_active":
-          return callTool("get_active_tab", {});
+          return callTool("get_active_tab", {}, PENDING_REQUEST_TIMEOUT_MS, false);
         case "new":
-          return callTool("new_tab", { url: args.url });
+          return callTool("new_tab", { url: args.url }, PENDING_REQUEST_TIMEOUT_MS, false);
         case "close":
-          return callTool("close_tab", { tabId: args.tabId as number });
+          return callTool(
+            "close_tab",
+            { tabId: args.tabId as number },
+            PENDING_REQUEST_TIMEOUT_MS,
+            false
+          );
         case "switch":
-          return callTool("switch_tab", { tabId: args.tabId as number });
+          return callTool(
+            "switch_tab",
+            { tabId: args.tabId as number },
+            PENDING_REQUEST_TIMEOUT_MS,
+            false
+          );
       }
     }
   );
