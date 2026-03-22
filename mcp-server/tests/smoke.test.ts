@@ -20,6 +20,9 @@ beforeAll(async () => {
     stdio: ["ignore", "pipe", "pipe"],
   });
 
+  // Drain MCP JSON-RPC on stdout so the pipe buffer never blocks the server.
+  serverProcess.stdout?.on("data", () => {});
+
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Server start timeout")), 8000);
     const onData = (data: Buffer): void => {
@@ -94,7 +97,10 @@ describe.sequential("poke-browser MCP server", () => {
       (response as { error?: string; type?: string }).error ??
         (response as { error?: string; type?: string }).type,
     ).toBeTruthy();
-    ws.close();
+    await new Promise<void>((resolve) => {
+      if (ws.readyState === WebSocket.CLOSED) resolve();
+      else ws.once("close", () => resolve());
+    });
   });
 
   it("accepts hello with correct token", async () => {

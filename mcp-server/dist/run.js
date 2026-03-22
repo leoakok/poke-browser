@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { bridge, extensionWebSocketServer, readOptionalWebSocketAuthToken, readPort, startExtensionWebSocketServer, } from "./transport.js";
+import { log } from "./logger.js";
 import { createPokeBrowserMcpServer } from "./server.js";
 const DEFAULT_MCP_HTTP_PORT = 8755;
 /** Prevents a second StdioServerTransport / mcp.connect in the same process (guards against accidental double-bind). */
@@ -26,7 +27,7 @@ function installProcessGuards() {
 let shutdownHandlersInstalled = false;
 // Graceful shutdown - releases extension WebSocket port cleanly on SIGINT/SIGTERM
 async function shutdown(signal) {
-    console.log(`[poke-browser] Received ${signal}, shutting down...`);
+    log(`[poke-browser] Received ${signal}, shutting down...`);
     const wss = extensionWebSocketServer;
     if (wss) {
         for (const client of wss.clients) {
@@ -40,9 +41,9 @@ async function shutdown(signal) {
         await new Promise((resolve) => {
             wss.close((err) => {
                 if (err)
-                    console.error("[poke-browser] wss.close error:", err);
+                    log("[poke-browser] wss.close error:", err);
                 else
-                    console.log("[poke-browser] WebSocket server closed, port released");
+                    log("[poke-browser] WebSocket server closed, port released");
                 resolve();
             });
         });
@@ -65,12 +66,12 @@ async function shutdown(signal) {
         }
         tunnelChild = null;
     }
-    console.log("[poke-browser] Shutdown complete");
+    log("[poke-browser] Shutdown complete");
     process.exit(0);
 }
 function shutdownWithTimeout(signal) {
     const timer = setTimeout(() => {
-        console.error("[poke-browser] Forced exit after 3s timeout");
+        log("[poke-browser] Forced exit after 3s timeout");
         process.exit(1);
     }, 3000);
     timer.unref();
@@ -118,7 +119,7 @@ function logAndStartExtensionWebSocket(port) {
         console.error("[poke-browser-mcp] Set the extension popup Auth token (storage key wsAuthToken) to the same value.");
     }
     else {
-        console.error(`[poke-browser] WebSocket Server active on port ${port} (Mode: Development/Open)`);
+        log(`[poke-browser] WebSocket Server active on port ${port} (Mode: Development/Open)`);
     }
     return startExtensionWebSocketServer(port, bridge, { authToken });
 }

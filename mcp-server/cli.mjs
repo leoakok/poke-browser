@@ -14,7 +14,7 @@ function pkgJson() {
 }
 
 if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
-  console.log(`@leokok/poke-browser — MCP server for the poke-browser Chrome extension
+  console.error(`@leokok/poke-browser — MCP server for the poke-browser Chrome extension
 
 Usage:
   poke-browser                  MCP over stdio (default; Cursor, Claude Desktop, etc.)
@@ -32,7 +32,7 @@ Build once (or pass --build):
 }
 
 if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
-  console.log(pkgJson().version ?? "0.0.0");
+  console.error(pkgJson().version ?? "0.0.0");
   process.exit(0);
 }
 
