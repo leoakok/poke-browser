@@ -25,28 +25,8 @@ async function callTool(command, payload, timeoutMs = PENDING_REQUEST_TIMEOUT_MS
     }
 }
 const tabIdSchema = z.number().int().positive();
-/**
- * Single z.object (not z.discriminatedUnion): @modelcontextprotocol/sdk only JSON-serializes
- * object-shaped schemas for tools/list. A discriminatedUnion has no `.shape`, so clients saw
- * inputSchema `{}` and could send args that fail union discrimination on the server.
- */
-const manageTabsInputSchema = z
-    .object({
-    action: z.enum(["list", "get_active", "new", "close", "switch"]),
-    url: z.string().min(1).optional(),
-    tabId: tabIdSchema.optional(),
-})
-    .superRefine((val, ctx) => {
-    if (val.action === "close" || val.action === "switch") {
-        if (val.tabId === undefined) {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "tabId is required when action is close or switch",
-                path: ["tabId"],
-            });
-        }
-    }
-});
+/** managetabs action literals (snake_case — must match JSON Schema enum in tools/list). */
+const manageTabsActionSchema = z.enum(["list", "get_active", "new", "close", "switch"]);
 export function registerTools(mcp) {
     mcp.registerTool("navigate_to", {
         description: "Navigate a tab to a URL (defaults to the active tab). Optionally wait until the load completes.",
@@ -188,8 +168,18 @@ export function registerTools(mcp) {
     }, async ({ tabId, device, width, height, deviceScaleFactor, userAgent }) => callTool("device_emulate", { tabId, device, width, height, deviceScaleFactor, userAgent }, 30_000));
     mcp.registerTool("managetabs", {
         description: "List tabs, read the active tab, open, close, or switch tabs in the connected Chrome profile.",
-        inputSchema: manageTabsInputSchema,
+        // Raw shape (not z.object().superRefine): @modelcontextprotocol/sdk normalizeObjectSchema
+        // only unwraps ZodObject / shapes. ZodEffects loses .shape → tools/list inputSchema becomes {}.
+        inputSchema: {
+            action: manageTabsActionSchema.describe("list | get_active | new | close | switch (tabId required for close and switch)"),
+            url: z.string().min(1).optional().describe("URL when action is new"),
+            tabId: tabIdSchema.optional().describe("Tab id when action is close or switch"),
+        },
     }, async (args) => {
+        if ((args.action === "close" || args.action === "switch") &&
+            args.tabId === undefined) {
+            return toolError("tabId is required when action is close or switch");
+        }
         switch (args.action) {
             case "list":
                 return callTool("list_tabs", {});
