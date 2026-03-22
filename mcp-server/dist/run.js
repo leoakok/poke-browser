@@ -3,11 +3,14 @@ import { PassThrough } from "node:stream";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { bridge, readOptionalWebSocketAuthToken, readPort, startExtensionWebSocketServer, } from "./transport.js";
+import { bridge, extensionWebSocketServer, readOptionalWebSocketAuthToken, readPort, startExtensionWebSocketServer, } from "./transport.js";
 import { createPokeBrowserMcpServer } from "./server.js";
 const DEFAULT_MCP_HTTP_PORT = 8755;
 /** Prevents a second StdioServerTransport / mcp.connect in the same process (guards against accidental double-bind). */
 let stdioMcpConnected = false;
+/** Active stdio MCP transport (stdio mode only); closed on graceful shutdown. */
+let mcpTransport = null;
+let tunnelChild = null;
 let processGuardsInstalled = false;
 function installProcessGuards() {
     if (processGuardsInstalled)
@@ -19,6 +22,66 @@ function installProcessGuards() {
     process.on("unhandledRejection", (reason) => {
         console.error("[poke-browser-mcp] unhandledRejection:", reason);
     });
+}
+let shutdownHandlersInstalled = false;
+// Graceful shutdown - releases extension WebSocket port cleanly on SIGINT/SIGTERM
+async function shutdown(signal) {
+    console.log(`[poke-browser] Received ${signal}, shutting down...`);
+    const wss = extensionWebSocketServer;
+    if (wss) {
+        for (const client of wss.clients) {
+            try {
+                client.terminate();
+            }
+            catch {
+                /* ignore */
+            }
+        }
+        await new Promise((resolve) => {
+            wss.close((err) => {
+                if (err)
+                    console.error("[poke-browser] wss.close error:", err);
+                else
+                    console.log("[poke-browser] WebSocket server closed, port released");
+                resolve();
+            });
+        });
+    }
+    if (mcpTransport) {
+        try {
+            await mcpTransport.close();
+        }
+        catch {
+            /* ignore */
+        }
+        mcpTransport = null;
+    }
+    if (tunnelChild && !tunnelChild.killed) {
+        try {
+            tunnelChild.kill("SIGINT");
+        }
+        catch {
+            /* ignore */
+        }
+        tunnelChild = null;
+    }
+    console.log("[poke-browser] Shutdown complete");
+    process.exit(0);
+}
+function shutdownWithTimeout(signal) {
+    const timer = setTimeout(() => {
+        console.error("[poke-browser] Forced exit after 3s timeout");
+        process.exit(1);
+    }, 3000);
+    timer.unref();
+    void shutdown(signal).catch(() => process.exit(1));
+}
+function installShutdownHandlers() {
+    if (shutdownHandlersInstalled)
+        return;
+    shutdownHandlersInstalled = true;
+    process.on("SIGINT", () => shutdownWithTimeout("SIGINT"));
+    process.on("SIGTERM", () => shutdownWithTimeout("SIGTERM"));
 }
 function readMcpHttpPortFromEnv() {
     const raw = process.env.POKE_BROWSER_MCP_PORT ??
@@ -85,9 +148,10 @@ async function runStdio() {
         return;
     }
     const mcp = createPokeBrowserMcpServer();
-    const transport = new StdioServerTransport(mcpStdin, process.stdout);
-    await mcp.connect(transport);
+    mcpTransport = new StdioServerTransport(mcpStdin, process.stdout);
+    await mcp.connect(mcpTransport);
     stdioMcpConnected = true;
+    installShutdownHandlers();
     console.error("[poke-browser-mcp] MCP stdio transport connected (ready for MCP clients)");
 }
 async function runHttp(opts) {
@@ -140,6 +204,7 @@ async function runHttp(opts) {
                 resolve();
         });
     });
+    installShutdownHandlers();
     const url = `http://127.0.0.1:${port}/mcp`;
     console.error(`[poke-browser-mcp] MCP (HTTP) → ${url}`);
     console.error(`[poke-browser-mcp] Extension WebSocket → ws://127.0.0.1:${WS_PORT}`);
@@ -158,12 +223,7 @@ async function runHttp(opts) {
         tunnel.on("exit", (code) => {
             process.exit(code ?? 0);
         });
-        const stopTunnel = () => {
-            if (!tunnel.killed)
-                tunnel.kill("SIGINT");
-        };
-        process.on("SIGINT", stopTunnel);
-        process.on("SIGTERM", stopTunnel);
+        tunnelChild = tunnel;
     }
 }
 export async function main() {
