@@ -258,6 +258,24 @@ async function resolveTabId(tabId) {
 }
 
 /**
+ * Merge Chrome tab metadata into tool results (tabId, url, title from tabs.get).
+ * @param {number} tabId
+ * @param {unknown} value
+ */
+async function withTabMeta(tabId, value) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const meta = {
+    tabId,
+    url: tab?.url ?? "",
+    title: tab?.title ?? "",
+  };
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return { ...(/** @type {Record<string, unknown>} */ (value)), ...meta };
+  }
+  return { ...meta, value };
+}
+
+/**
  * Bring a tab to the foreground so captureVisibleTab targets it.
  * @param {number} tabId
  */
@@ -557,19 +575,20 @@ async function handleNavigateTo(payload) {
   const url = typeof p.url === "string" ? p.url : "";
   if (!url) throw new Error("navigate_to requires url");
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
-  const waitForLoad = p.waitForLoad === true;
-  if (waitForLoad) {
-    const done = waitForTabLoadComplete(tabId, NAVIGATE_WAIT_MS);
-    await chrome.tabs.update(tabId, { url });
-    await done;
-  } else {
-    await chrome.tabs.update(tabId, { url });
-  }
+  /** Always wait for chrome.tabs.onUpdated status "complete" so finalUrl/title match the loaded page (not a stale devtools/interstitial URL). */
+  const timeoutMs = p.waitForLoad === false ? 10_000 : NAVIGATE_WAIT_MS;
+  const done = waitForTabLoadComplete(tabId, timeoutMs);
+  await chrome.tabs.update(tabId, { url });
+  await done;
   const tab = await chrome.tabs.get(tabId);
+  const finalUrl = tab.url ?? "";
+  const title = tab.title ?? "";
   return {
     success: true,
-    finalUrl: tab.url ?? "",
-    title: tab.title ?? "",
+    tabId,
+    url: finalUrl,
+    finalUrl,
+    title,
   };
 }
 
@@ -586,10 +605,11 @@ async function handleClickElement(payload) {
     const res = await chrome.tabs.sendMessage(tabId, { type: "POKE_CLICK_ELEMENT", selector }).catch((e) => {
       throw new Error(`click_element relay failed: ${String(e)}`);
     });
-    return res;
+    return withTabMeta(tabId, res);
   }
   if (hasXY) {
-    return clickViaDebugger(tabId, x, y);
+    const r = await clickViaDebugger(tabId, x, y);
+    return withTabMeta(tabId, r);
   }
   throw new Error("click_element requires selector or numeric x and y");
 }
@@ -612,9 +632,13 @@ async function handleTypeText(payload) {
     .catch(() => null);
 
   if (res && res.success === true) {
-    return { success: true, charsTyped: typeof res.charsTyped === "number" ? res.charsTyped : text.length };
+    return withTabMeta(tabId, {
+      success: true,
+      charsTyped: typeof res.charsTyped === "number" ? res.charsTyped : text.length,
+    });
   }
-  return typeTextViaDebugger(tabId, text);
+  const dbg = await typeTextViaDebugger(tabId, text);
+  return withTabMeta(tabId, dbg);
 }
 
 /** @param {unknown} payload */
@@ -624,7 +648,7 @@ async function handleScrollWindow(payload) {
   const res = await chrome.tabs.sendMessage(tabId, { type: "POKE_SCROLL_WINDOW", payload: p }).catch((e) => {
     throw new Error(`scroll_window relay failed: ${String(e)}`);
   });
-  return res;
+  return withTabMeta(tabId, res);
 }
 
 /** @param {unknown} payload */
@@ -642,11 +666,11 @@ async function handleScreenshot(payload) {
   const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, opts);
   const m = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
   if (!m) throw new Error("Invalid screenshot data from browser");
-  return {
+  return withTabMeta(tabId, {
     type: "screenshot_result",
     data: m[2],
     mimeType: m[1],
-  };
+  });
 }
 
 /** @param {unknown} payload */
@@ -836,11 +860,11 @@ async function handleFullPageCapture(payload) {
   const stitched = await stitchFullPageScreenshots(dataUrls);
   const m = /^data:([^;]+);base64,(.+)$/.exec(stitched);
   if (!m) throw new Error("full_page_capture: invalid stitched data URL");
-  return {
+  return withTabMeta(tabId, {
     type: "screenshot_result",
     data: m[2],
     mimeType: m[1],
-  };
+  });
 }
 
 /** @param {unknown} payload */
@@ -943,19 +967,21 @@ async function sendPerceptionToTab(tabId, pokeType, data) {
 async function handleGetDomSnapshot(payload) {
   const p = asPayload(payload);
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
-  return sendPerceptionToTab(tabId, "POKE_GET_DOM_SNAPSHOT", {
+  const res = await sendPerceptionToTab(tabId, "POKE_GET_DOM_SNAPSHOT", {
     includeHidden: p.includeHidden === true,
     maxDepth: typeof p.maxDepth === "number" ? p.maxDepth : undefined,
   });
+  return withTabMeta(tabId, res);
 }
 
 /** @param {unknown} payload */
 async function handleGetAccessibilityTree(payload) {
   const p = asPayload(payload);
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
-  return sendPerceptionToTab(tabId, "POKE_GET_A11Y_TREE", {
+  const res = await sendPerceptionToTab(tabId, "POKE_GET_A11Y_TREE", {
     interactiveOnly: p.interactiveOnly === true,
   });
+  return withTabMeta(tabId, res);
 }
 
 /** @param {unknown} payload */
@@ -967,7 +993,8 @@ async function handleFindElement(payload) {
     p.strategy === "css" || p.strategy === "text" || p.strategy === "aria" || p.strategy === "xpath"
       ? p.strategy
       : "auto";
-  return sendPerceptionToTab(tabId, "POKE_FIND_ELEMENT", { query, strategy });
+  const res = await sendPerceptionToTab(tabId, "POKE_FIND_ELEMENT", { query, strategy });
+  return withTabMeta(tabId, res);
 }
 
 /** @param {unknown} payload */
@@ -976,7 +1003,8 @@ async function handleReadPage(payload) {
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
   const format =
     p.format === "markdown" || p.format === "text" || p.format === "structured" ? p.format : "structured";
-  return sendPerceptionToTab(tabId, "POKE_READ_PAGE", { format });
+  const res = await sendPerceptionToTab(tabId, "POKE_READ_PAGE", { format });
+  return withTabMeta(tabId, res);
 }
 
 /** @param {unknown} payload */
@@ -987,11 +1015,12 @@ async function handleWaitForSelector(payload) {
   const tabId = await resolveTabId(typeof p.tabId === "number" ? p.tabId : undefined);
   const timeout = typeof p.timeout === "number" && p.timeout > 0 ? p.timeout : 10000;
   const visible = p.visible === true;
-  return chrome.tabs
+  const res = await chrome.tabs
     .sendMessage(tabId, { type: "POKE_WAIT_FOR_SELECTOR", selector, timeout, visible })
     .catch((e) => {
       throw new Error(`wait_for_selector relay failed: ${String(e)}`);
     });
+  return withTabMeta(tabId, res);
 }
 
 /** @param {unknown} payload */
@@ -1040,11 +1069,14 @@ async function handleExecuteScript(payload) {
   });
 
   const fr = /** @type {{ result?: unknown; error?: string } | undefined} */ (results[0]?.result);
-  if (!fr) return { result: null, error: "No frame result" };
+  if (!fr) return withTabMeta(tabId, { result: null, error: "No frame result" });
   if (typeof fr.error === "string" && fr.error && fr.result === undefined) {
-    return { result: undefined, error: fr.error };
+    return withTabMeta(tabId, { result: undefined, error: fr.error });
   }
-  return { result: fr.result, error: typeof fr.error === "string" ? fr.error : undefined };
+  return withTabMeta(tabId, {
+    result: fr.result,
+    error: typeof fr.error === "string" ? fr.error : undefined,
+  });
 }
 
 /** @param {unknown} payload */
@@ -1372,7 +1404,7 @@ async function handleFillForm(payload) {
     .catch((e) => {
       throw new Error(`fill_form relay failed: ${String(e)}`);
     });
-  return res;
+  return withTabMeta(tabId, res);
 }
 
 /** @param {unknown} payload */
@@ -1438,9 +1470,10 @@ async function handleHoverElement(payload) {
   const hasXY = Number.isFinite(x) && Number.isFinite(y);
 
   if (selector) {
-    return chrome.tabs.sendMessage(tabId, { type: "POKE_HOVER_ELEMENT", selector }).catch((e) => {
+    const res = await chrome.tabs.sendMessage(tabId, { type: "POKE_HOVER_ELEMENT", selector }).catch((e) => {
       throw new Error(`hover_element relay failed: ${String(e)}`);
     });
+    return withTabMeta(tabId, res);
   }
   if (hasXY) {
     await debuggerAttachForTool(tabId);
@@ -1450,7 +1483,7 @@ async function handleHoverElement(payload) {
         x,
         y,
       });
-      return { success: true };
+      return withTabMeta(tabId, { success: true });
     } finally {
       await debuggerDetachForTool(tabId);
     }

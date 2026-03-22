@@ -25,18 +25,22 @@ async function callTool(command, payload, timeoutMs = PENDING_REQUEST_TIMEOUT_MS
     }
 }
 const tabIdSchema = z.number().int().positive();
-/** managetabs action literals (snake_case — must match JSON Schema enum in tools/list). */
-const manageTabsActionSchema = z.enum(["list", "get_active", "new", "close", "switch"]);
+/** Flat ZodObject (required `action`) so MCP tools/list JSON Schema includes `required: ["action"]`. */
+const ManageTabsSchema = z.object({
+    action: z.enum(["list", "get_active", "new", "close", "switch"]),
+    tabId: z.number().optional(),
+    url: z.string().optional(),
+});
 export function registerTools(mcp) {
     mcp.registerTool("navigate_to", {
-        description: "Navigate a tab to a URL (defaults to the active tab). Optionally wait until the load completes.",
+        description: "Navigate a tab to a URL (defaults to the active tab). Always waits for chrome.tabs status complete (via onUpdated) before returning tabId, url, and title. waitForLoad false uses a 10s load timeout; omitted/true uses 30s.",
         inputSchema: {
             url: z.string().min(1).describe("Destination URL"),
             tabId: tabIdSchema.optional().describe("Optional tab id; defaults to active tab"),
             waitForLoad: z
                 .boolean()
                 .optional()
-                .describe("If true, wait up to 30s for status complete before returning"),
+                .describe("If false, use a shorter (10s) load wait timeout; if true/omitted, up to ~30s"),
         },
     }, async ({ url, tabId, waitForLoad }) => callTool("navigate_to", { url, tabId, waitForLoad }, PENDING_REQUEST_TIMEOUT_MS + 35_000));
     mcp.registerTool("click_element", {
@@ -97,15 +101,25 @@ export function registerTools(mcp) {
             if (!isScreenshotResultPayload(result)) {
                 return toolError("Extension returned an invalid screenshot payload.");
             }
-            return {
-                content: [
-                    {
-                        type: "image",
-                        data: result.data,
-                        mimeType: result.mimeType,
-                    },
-                ],
-            };
+            const ext = result;
+            const tabMeta = typeof ext.tabId === "number"
+                ? {
+                    tabId: ext.tabId,
+                    url: typeof ext.url === "string" ? ext.url : "",
+                    title: typeof ext.title === "string" ? ext.title : "",
+                }
+                : null;
+            const content = [
+                {
+                    type: "image",
+                    data: result.data,
+                    mimeType: result.mimeType,
+                },
+            ];
+            if (tabMeta) {
+                content.push({ type: "text", text: jsonText({ tab: tabMeta }) });
+            }
+            return { content };
         }
         catch (e) {
             if (e instanceof RateLimitError) {
@@ -130,15 +144,25 @@ export function registerTools(mcp) {
             if (!isScreenshotResultPayload(result)) {
                 return toolError("Extension returned an invalid full_page_capture payload.");
             }
-            return {
-                content: [
-                    {
-                        type: "image",
-                        data: result.data,
-                        mimeType: result.mimeType,
-                    },
-                ],
-            };
+            const ext = result;
+            const tabMeta = typeof ext.tabId === "number"
+                ? {
+                    tabId: ext.tabId,
+                    url: typeof ext.url === "string" ? ext.url : "",
+                    title: typeof ext.title === "string" ? ext.title : "",
+                }
+                : null;
+            const content = [
+                {
+                    type: "image",
+                    data: result.data,
+                    mimeType: result.mimeType,
+                },
+            ];
+            if (tabMeta) {
+                content.push({ type: "text", text: jsonText({ tab: tabMeta }) });
+            }
+            return { content };
         }
         catch (e) {
             if (e instanceof RateLimitError) {
@@ -168,16 +192,10 @@ export function registerTools(mcp) {
     }, async ({ tabId, device, width, height, deviceScaleFactor, userAgent }) => callTool("device_emulate", { tabId, device, width, height, deviceScaleFactor, userAgent }, 30_000));
     mcp.registerTool("managetabs", {
         description: "List tabs, read the active tab, open, close, or switch tabs in the connected Chrome profile.",
-        // Raw shape (not z.object().superRefine): @modelcontextprotocol/sdk normalizeObjectSchema
-        // only unwraps ZodObject / shapes. ZodEffects loses .shape → tools/list inputSchema becomes {}.
-        inputSchema: {
-            action: manageTabsActionSchema.describe("list | get_active | new | close | switch (tabId required for close and switch)"),
-            url: z.string().min(1).optional().describe("URL when action is new"),
-            tabId: tabIdSchema.optional().describe("Tab id when action is close or switch"),
-        },
+        inputSchema: ManageTabsSchema,
     }, async (args) => {
         if ((args.action === "close" || args.action === "switch") &&
-            args.tabId === undefined) {
+            (args.tabId === undefined || !Number.isFinite(args.tabId))) {
             return toolError("tabId is required when action is close or switch");
         }
         switch (args.action) {
