@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import { WebSocket } from "ws";
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
@@ -69,6 +69,10 @@ function sendAndReceive(ws: WebSocket, msg: object): Promise<object> {
 
 // One authenticated client replaces another; run tests one at a time.
 describe.sequential("poke-browser MCP server", () => {
+  afterEach(async () => {
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
   it("accepts connections and sends welcome", async () => {
     const ws = await connectWs();
     expect(ws.readyState).toBe(WebSocket.OPEN);

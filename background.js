@@ -65,7 +65,10 @@ function clearReconnectTimer() {
   }
 }
 
-function scheduleReconnectAfterClose() {
+/**
+ * @param {number} [closeCode] WebSocket close code from the `close` event (0 if unknown).
+ */
+function scheduleReconnectAfterClose(closeCode = 0) {
   clearReconnectTimer();
   if (wsReconnectCycles >= WS_MAX_RETRIES) {
     console.error("poke-browser: max WebSocket reconnect attempts reached; not retrying further");
@@ -73,7 +76,10 @@ function scheduleReconnectAfterClose() {
     setStatus("disconnected");
     return;
   }
-  const delay = wsRetryDelayMs;
+  let delay = wsRetryDelayMs;
+  if (closeCode === 4000) {
+    delay = Math.max(delay, 3000);
+  }
   wsRetryDelayMs = Math.min(wsRetryDelayMs * 2, WS_MAX_RETRY_MS);
   wsReconnectCycles += 1;
   console.log("[poke-browser ext] Retrying WebSocket in", delay, "ms (cycle", wsReconnectCycles, "/", WS_MAX_RETRIES, ")");
@@ -154,8 +160,8 @@ function connectWebSocket() {
 
     socket.addEventListener("close", (event) => {
       setStatus("disconnected");
-      console.log(
-        "[poke-browser ext] WebSocket CLOSED code:",
+      console.error(
+        "[poke-browser ext] WebSocket CLOSED, code:",
         event.code,
         "reason:",
         event.reason,
@@ -168,7 +174,11 @@ function connectWebSocket() {
         suppressReconnectOnce = false;
         return;
       }
-      scheduleReconnectAfterClose();
+      if (event.code === 1000 || event.code === 1001) {
+        console.error("[poke-browser ext] Clean close, not reconnecting");
+        return;
+      }
+      scheduleReconnectAfterClose(event.code);
     });
 
     socket.addEventListener("error", (event) => {
