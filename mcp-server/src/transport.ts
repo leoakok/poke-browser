@@ -1,8 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
+import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 
 const WS_PING_INTERVAL_MS = 20_000;
 const WS_PONG_DEADLINE_MS = 30_000;
+const RATE_LIMIT_MAX = 30;
+const RATE_LIMIT_WINDOW_MS = 10_000;
 
 /** Strong ref so the server is never GC'd; also useful for tests. */
 export let extensionWebSocketServer: WebSocketServer | null = null;
@@ -60,6 +63,24 @@ export type ScreenshotResultPayload = {
   mimeType: string;
 };
 
+/**
+ * Shared secret for the extension `hello` handshake. Set `POKE_BROWSER_TOKEN` to pin a value;
+ * otherwise a random token is generated each process start (printed to stderr).
+ */
+export function readWebSocketAuthToken(): string {
+  const raw = process.env.POKE_BROWSER_TOKEN;
+  if (raw !== undefined && raw !== "") return raw;
+  return randomBytes(24).toString("hex");
+}
+
+export class RateLimitError extends Error {
+  readonly retryAfter = 10;
+  constructor() {
+    super("rate_limit_exceeded");
+    this.name = "RateLimitError";
+  }
+}
+
 export function readPort(): number {
   const raw = process.env.POKE_BROWSER_WS_PORT ?? process.env.WS_PORT;
   if (raw === undefined || raw === "") return DEFAULT_PORT;
@@ -94,6 +115,7 @@ export function jsonText(data: unknown): string {
 
 export class ExtensionBridge {
   private socket: WebSocket | null = null;
+  private rateTimestamps: number[] = [];
   private readonly pending = new Map<
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
@@ -128,11 +150,6 @@ export class ExtensionBridge {
     }
     if (!isRecord(msg)) return;
 
-    if (msg.type === "hello") {
-      console.error("[poke-browser-mcp] Extension connected:", jsonText(msg));
-      return;
-    }
-
     if (msg.type === "response" && typeof msg.requestId === "string") {
       const entry = this.pending.get(msg.requestId);
       if (!entry) return;
@@ -151,6 +168,13 @@ export class ExtensionBridge {
     if (!sock || sock.readyState !== 1) {
       return Promise.reject(new Error("Chrome extension is not connected to the MCP WebSocket server"));
     }
+
+    const now = Date.now();
+    this.rateTimestamps = this.rateTimestamps.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+    if (this.rateTimestamps.length >= RATE_LIMIT_MAX) {
+      return Promise.reject(new RateLimitError());
+    }
+    this.rateTimestamps.push(now);
 
     const requestId = randomUUID();
     const body: CommandMessage = { type: "command", requestId, command, payload };
@@ -193,6 +217,15 @@ function waitForWebSocketListening(wss: WebSocketServer): Promise<void> {
   });
 }
 
+export type ExtensionWsServerOptions = {
+  authToken: string;
+};
+
+function isWsOriginAllowed(origin: string | undefined): boolean {
+  if (origin === undefined || origin === "") return true;
+  return origin.startsWith("chrome-extension://");
+}
+
 /**
  * Binds the extension WebSocket server and resolves only after the port is listening
  * (avoids ERR_CONNECTION_REFUSED races with early client connects).
@@ -200,7 +233,9 @@ function waitForWebSocketListening(wss: WebSocketServer): Promise<void> {
 export async function startExtensionWebSocketServer(
   port: number,
   b: ExtensionBridge,
+  options: ExtensionWsServerOptions,
 ): Promise<WebSocketServer> {
+  const { authToken } = options;
   const wss = new WebSocketServer({ port, host: "127.0.0.1" });
   const trackedClients = new Set<WebSocket>();
 
@@ -208,7 +243,18 @@ export async function startExtensionWebSocketServer(
     console.error("[poke-browser-mcp] WebSocket server error:", err);
   });
 
-  wss.on("connection", (ws: WebSocket) => {
+  wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
+    const origin = req.headers.origin;
+    if (!isWsOriginAllowed(origin)) {
+      console.error(`[poke-browser-mcp] Rejected WebSocket connection from disallowed Origin: ${origin ?? "(none)"}`);
+      try {
+        ws.close(4403, "origin not allowed");
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+
     for (const client of wss.clients) {
       if (client !== ws && client.readyState === WebSocket.OPEN) {
         try {
@@ -220,10 +266,11 @@ export async function startExtensionWebSocketServer(
     }
 
     trackedClients.add(ws);
-    b.attachSocket(ws);
-    console.error("[poke-browser-mcp] Extension WebSocket client connected");
 
+    let authenticated = false;
+    let pingInterval: NodeJS.Timeout | null = null;
     let pongDeadline: NodeJS.Timeout | null = null;
+
     const clearPongDeadline = (): void => {
       if (pongDeadline) {
         clearTimeout(pongDeadline);
@@ -231,23 +278,40 @@ export async function startExtensionWebSocketServer(
       }
     };
 
-    const pingInterval = setInterval(() => {
-      if (ws.readyState !== WebSocket.OPEN) return;
+    const stopPing = (): void => {
+      if (pingInterval) {
+        clearInterval(pingInterval);
+        pingInterval = null;
+      }
       clearPongDeadline();
-      pongDeadline = setTimeout(() => {
-        console.error("[poke-browser-mcp] WebSocket client missed pong deadline; terminating client");
+    };
+
+    const startPing = (): void => {
+      stopPing();
+      pingInterval = setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        clearPongDeadline();
+        pongDeadline = setTimeout(() => {
+          console.error("[poke-browser-mcp] WebSocket client missed pong deadline; terminating client");
+          try {
+            ws.terminate();
+          } catch {
+            /* ignore */
+          }
+        }, WS_PONG_DEADLINE_MS);
         try {
-          ws.terminate();
+          ws.ping();
         } catch {
           /* ignore */
         }
-      }, WS_PONG_DEADLINE_MS);
-      try {
-        ws.ping();
-      } catch {
-        /* ignore */
-      }
-    }, WS_PING_INTERVAL_MS);
+      }, WS_PING_INTERVAL_MS);
+    };
+
+    try {
+      ws.send(JSON.stringify({ type: "welcome", server: "poke-browser-mcp", version: 1 }));
+    } catch {
+      /* ignore */
+    }
 
     ws.on("pong", () => {
       clearPongDeadline();
@@ -256,15 +320,63 @@ export async function startExtensionWebSocketServer(
     ws.on("message", (data) => {
       const raw =
         typeof data === "string" ? data : Buffer.isBuffer(data) ? data.toString("utf8") : String(data);
+
+      if (!authenticated) {
+        let msg: unknown;
+        try {
+          msg = JSON.parse(raw) as unknown;
+        } catch {
+          try {
+            ws.close(1003, "invalid json");
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        if (!isRecord(msg) || msg.type !== "hello") {
+          try {
+            ws.close(1008, "hello required");
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        const token = typeof msg.token === "string" ? msg.token : "";
+        if (token !== authToken) {
+          try {
+            ws.send(JSON.stringify({ type: "auth_error", error: "invalid_token" }));
+          } catch {
+            /* ignore */
+          }
+          try {
+            ws.close(4401, "unauthorized");
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        authenticated = true;
+        b.attachSocket(ws);
+        try {
+          ws.send(JSON.stringify({ type: "auth_ok" }));
+        } catch {
+          /* ignore */
+        }
+        startPing();
+        console.error("[poke-browser-mcp] Extension WebSocket client authenticated");
+        return;
+      }
+
       b.handleMessage(raw);
     });
 
     ws.on("close", () => {
-      clearInterval(pingInterval);
-      clearPongDeadline();
+      stopPing();
       trackedClients.delete(ws);
-      b.clearSocket(ws);
-      b.rejectAllPending("Chrome extension WebSocket disconnected");
+      if (authenticated) {
+        b.clearSocket(ws);
+        b.rejectAllPending("Chrome extension WebSocket disconnected");
+      }
       console.error("[poke-browser-mcp] Extension WebSocket client disconnected");
     });
 

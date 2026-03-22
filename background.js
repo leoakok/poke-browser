@@ -48,6 +48,11 @@ async function getWsPort() {
   return DEFAULT_WS_PORT;
 }
 
+async function getWsAuthToken() {
+  const { wsAuthToken } = await chrome.storage.local.get("wsAuthToken");
+  return typeof wsAuthToken === "string" ? wsAuthToken : "";
+}
+
 function setStatus(next) {
   mcpStatus = next;
   chrome.runtime.sendMessage({ type: "POKE_STATUS", status: next }).catch(() => {});
@@ -116,17 +121,21 @@ function connectWebSocket() {
       setStatus("connected");
       console.log("[poke-browser ext] WebSocket OPENED", url);
       logCommand("out", `Connected to MCP WebSocket ${url}`);
-      try {
-        socket?.send(
-          JSON.stringify({
-            type: "hello",
-            client: "poke-browser-extension",
-            version: chrome.runtime.getManifest().version,
-          })
-        );
-      } catch (_) {
-        /* ignore */
-      }
+      void (async () => {
+        const token = await getWsAuthToken();
+        try {
+          socket?.send(
+            JSON.stringify({
+              type: "hello",
+              token,
+              client: "poke-browser-extension",
+              version: chrome.runtime.getManifest().version,
+            }),
+          );
+        } catch (_) {
+          /* ignore */
+        }
+      })();
     });
 
     socket.addEventListener("message", (event) => {
@@ -1529,12 +1538,33 @@ connectWebSocket();
 /** @type {Record<string, (message: unknown, sendResponse: (r: unknown) => void) => boolean | void>} */
 const RUNTIME_HANDLERS = {
   POKE_GET_STATE: (message, sendResponse) => {
-    void getWsPort().then((port) => {
+    void Promise.all([getWsPort(), chrome.storage.local.get("wsAuthToken")]).then(([port, st]) => {
+      const tok = st && typeof st.wsAuthToken === "string" ? st.wsAuthToken : "";
       sendResponse({
         status: mcpStatus,
         port,
         log: commandLog,
+        hasAuthToken: tok.length > 0,
       });
+    });
+    return true;
+  },
+  POKE_SET_TOKEN: (message, sendResponse) => {
+    const m = /** @type {{ token?: unknown }} */ (message);
+    const token = typeof m.token === "string" ? m.token : "";
+    void chrome.storage.local.set({ wsAuthToken: token }).then(() => {
+      resetWebSocketBackoff();
+      if (socket) {
+        suppressReconnectOnce = true;
+        try {
+          socket.close();
+        } catch (_) {
+          suppressReconnectOnce = false;
+        }
+        socket = null;
+      }
+      connectWebSocket();
+      sendResponse({ ok: true });
     });
     return true;
   },

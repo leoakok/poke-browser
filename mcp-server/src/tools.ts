@@ -7,6 +7,7 @@ import {
   isScreenshotResultPayload,
   jsonText,
   PENDING_REQUEST_TIMEOUT_MS,
+  RateLimitError,
   type ExtensionCommand,
 } from "./transport.js";
 
@@ -34,6 +35,9 @@ async function callTool(
     const result = await bridge.request(command, payload, timeoutMs);
     return toolText(result);
   } catch (e) {
+    if (e instanceof RateLimitError) {
+      return toolText({ error: "rate_limit_exceeded", retryAfter: e.retryAfter });
+    }
     const msg = e instanceof Error ? e.message : String(e);
     return toolError(msg);
   }
@@ -172,6 +176,9 @@ export function registerTools(mcp: McpServer): void {
           ],
         };
       } catch (e) {
+        if (e instanceof RateLimitError) {
+          return toolText({ error: "rate_limit_exceeded", retryAfter: e.retryAfter });
+        }
         return toolError(e instanceof Error ? e.message : String(e));
       }
     }
@@ -213,6 +220,9 @@ export function registerTools(mcp: McpServer): void {
           ],
         };
       } catch (e) {
+        if (e instanceof RateLimitError) {
+          return toolText({ error: "rate_limit_exceeded", retryAfter: e.retryAfter });
+        }
         return toolError(e instanceof Error ? e.message : String(e));
       }
     },

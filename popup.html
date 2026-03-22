@@ -33,9 +33,17 @@
         min-width: 72px;
         color: color-mix(in srgb, CanvasText 75%, transparent);
       }
+      input[type="number"],
+      input[type="password"],
+      input[type="text"]#token {
+        padding: 4px 6px;
+      }
       input[type="number"] {
         width: 88px;
-        padding: 4px 6px;
+      }
+      input#token {
+        flex: 1;
+        min-width: 0;
       }
       button {
         padding: 4px 10px;
@@ -97,7 +105,15 @@
       <button type="button" id="applyPort">Apply</button>
       <button type="button" id="reconnect">Reconnect</button>
     </div>
-    <div class="hint">MCP server listens on this port; the extension connects as a WebSocket client.</div>
+    <div class="row">
+      <label for="token">Auth token</label>
+      <input id="token" type="password" autocomplete="off" placeholder="Paste token from MCP stderr" />
+      <button type="button" id="applyToken">Save</button>
+    </div>
+    <div class="hint">
+      MCP server listens on this port and prints a WebSocket auth token to stderr. Paste it here (must match
+      <code>POKE_BROWSER_TOKEN</code> if you set that env var).
+    </div>
     <div style="font-weight: 600">Recent activity</div>
     <div id="log"></div>
     <script src="popup.js"></script>

@@ -3,6 +3,8 @@ const statusText = document.getElementById("statusText");
 const portInput = document.getElementById("port");
 const applyPort = document.getElementById("applyPort");
 const reconnectBtn = document.getElementById("reconnect");
+const tokenInput = document.getElementById("token");
+const applyToken = document.getElementById("applyToken");
 const logEl = document.getElementById("log");
 
 function formatTime(ts) {
@@ -47,6 +49,9 @@ async function refresh() {
   if (state && portInput) {
     portInput.value = String(state.port ?? "");
   }
+  if (state && tokenInput && typeof state.hasAuthToken === "boolean") {
+    tokenInput.placeholder = state.hasAuthToken ? "•••••• (saved — type to replace)" : "Paste token from MCP stderr";
+  }
   if (state) {
     applyStatus(state.status);
     renderLog(state.log);
@@ -73,6 +78,17 @@ applyPort?.addEventListener("click", async () => {
 
 reconnectBtn?.addEventListener("click", async () => {
   await chrome.runtime.sendMessage({ type: "POKE_RECONNECT" });
+  await refresh();
+});
+
+applyToken?.addEventListener("click", async () => {
+  const token = tokenInput?.value ?? "";
+  const res = await chrome.runtime.sendMessage({ type: "POKE_SET_TOKEN", token });
+  if (res && !res.ok && logEl) {
+    logEl.textContent = "Could not save token.";
+    return;
+  }
+  if (tokenInput) tokenInput.value = "";
   await refresh();
 });
 
