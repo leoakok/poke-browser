@@ -18,7 +18,7 @@ In Chrome DevTools → Console on the extension's background page
 // [poke-browser ext] Message from MCP (first 200 chars): ...
 ```
 
-After the server sends a `welcome` message, the extension must reply with `hello` including the auth token (set in the popup as **Auth token**, stored as `wsAuthToken`, or match `POKE_BROWSER_TOKEN` on the server).
+After the server sends a `welcome` message, the extension replies with `hello`. If the server has `POKE_BROWSER_TOKEN` set, include that token (popup **Auth token** / `wsAuthToken`); if the server runs without that env var, auth is off and `hello` does not need a token.
 
 ## 2. Test via MCP Inspector
 

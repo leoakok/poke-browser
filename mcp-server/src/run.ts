@@ -7,13 +7,16 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import type { WebSocketServer } from "ws";
 import {
   bridge,
+  readOptionalWebSocketAuthToken,
   readPort,
-  readWebSocketAuthToken,
   startExtensionWebSocketServer,
 } from "./transport.js";
 import { createPokeBrowserMcpServer } from "./server.js";
 
 const DEFAULT_MCP_HTTP_PORT = 8755;
+
+/** Prevents a second StdioServerTransport / mcp.connect in the same process (guards against accidental double-bind). */
+let stdioMcpConnected = false;
 
 let processGuardsInstalled = false;
 
@@ -73,11 +76,17 @@ export function parseArgs(argv: string[]): {
 }
 
 function logAndStartExtensionWebSocket(port: number): Promise<WebSocketServer> {
-  const authToken = readWebSocketAuthToken();
-  console.error(`[poke-browser-mcp] WebSocket auth token: ${authToken}`);
-  console.error(
-    "[poke-browser-mcp] Set the extension popup Auth token (storage key wsAuthToken) to match, or set POKE_BROWSER_TOKEN before starting the server.",
-  );
+  const authToken = readOptionalWebSocketAuthToken();
+  if (authToken !== undefined) {
+    console.error(`[poke-browser-mcp] WebSocket auth enabled (POKE_BROWSER_TOKEN): ${authToken}`);
+    console.error(
+      "[poke-browser-mcp] Set the extension popup Auth token (storage key wsAuthToken) to the same value.",
+    );
+  } else {
+    console.error(
+      "[poke-browser-mcp] Running in dev mode (POKE_BROWSER_TOKEN unset): WebSocket auth disabled",
+    );
+  }
   return startExtensionWebSocketServer(port, bridge, { authToken });
 }
 
@@ -106,9 +115,17 @@ async function runStdio(): Promise<void> {
     console.error("[poke-browser-mcp] stdin error (WebSocket bridge keeps running):", e.message);
   });
 
+  if (stdioMcpConnected) {
+    console.error(
+      "[poke-browser-mcp] Ignoring duplicate stdio MCP connect (already bound; WebSocket server still running)",
+    );
+    return;
+  }
+
   const mcp = createPokeBrowserMcpServer();
   const transport = new StdioServerTransport(mcpStdin, process.stdout);
   await mcp.connect(transport);
+  stdioMcpConnected = true;
   console.error(
     "[poke-browser-mcp] MCP stdio transport connected (ready for MCP clients)",
   );

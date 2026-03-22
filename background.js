@@ -123,15 +123,21 @@ function connectWebSocket() {
       logCommand("out", `Connected to MCP WebSocket ${url}`);
       void (async () => {
         const token = await getWsAuthToken();
+        const hello =
+          token.length > 0
+            ? {
+                type: "hello",
+                token,
+                client: "poke-browser-extension",
+                version: chrome.runtime.getManifest().version,
+              }
+            : {
+                type: "hello",
+                client: "poke-browser-extension",
+                version: chrome.runtime.getManifest().version,
+              };
         try {
-          socket?.send(
-            JSON.stringify({
-              type: "hello",
-              token,
-              client: "poke-browser-extension",
-              version: chrome.runtime.getManifest().version,
-            }),
-          );
+          socket?.send(JSON.stringify(hello));
         } catch (_) {
           /* ignore */
         }
@@ -195,6 +201,12 @@ async function handleSocketMessage(raw) {
     msg = JSON.parse(raw);
   } catch {
     logCommand("in", "Invalid JSON from MCP");
+    return;
+  }
+
+  if (msg.type === "auth_ok") {
+    console.log("[poke-browser ext] Auth OK received, connection fully established");
+    logCommand("out", "WebSocket: auth OK from MCP");
     return;
   }
 

@@ -27,14 +27,14 @@ Chrome extension plus MCP (Model Context Protocol) server so an AI agent can dri
               Content script / page
 ```
 
-1. **Extension** (`background.js`) opens a WebSocket **client** to the MCP process. The server sends `welcome`, then the extension must send `hello` with a **shared token** (`POKE_BROWSER_TOKEN` or a random value printed at startup). After `auth_ok`, the server forwards tool calls as JSON **command** messages; the extension replies with **response**.
+1. **Extension** (`background.js`) opens a WebSocket **client** to the MCP process. The server sends `welcome`, then the extension sends `hello`. If `POKE_BROWSER_TOKEN` is set on the server, `hello` must include the same token (extension popup **Auth token**); if the env var is unset, auth is off (dev / zero-config). After `auth_ok`, the server forwards tool calls as JSON **command** messages; the extension replies with **response**.
 2. **MCP server** (`mcp-server/`) speaks MCP over **stdio** (or HTTP with `--http`), rate-limits outbound commands (30 per 10s), and only accepts WebSocket connections whose `Origin` is missing (CLI clients) or starts with `chrome-extension://`.
 3. **Content script** (`content.js`) relays DOM automation, console/error capture, and `evaluate_js` into the page.
 
 Ports and env vars:
 
 - **WebSocket:** `POKE_BROWSER_WS_PORT` (default **9009**) — match the extension popup **WS port** (`wsPort` in storage).
-- **Optional shared secret:** `POKE_BROWSER_TOKEN` — match the extension popup **Auth token** (`wsAuthToken`). See [Security](#security).
+- **Optional shared secret:** `POKE_BROWSER_TOKEN` — when set, match the extension popup **Auth token** (`wsAuthToken`). When unset, the WebSocket accepts `hello` without a token check. See [Security](#security).
 - **HTTP MCP** (`--http` / `--tunnel`): **8755** or `POKE_BROWSER_MCP_PORT` (aliases: `POKE_BROWSER_PORT`, `POKE_TUNNEL_LOCAL_PORT`).
 
 See **[TESTING.md](./TESTING.md)** for inspector payloads, manual WebSocket examples, and troubleshooting.
@@ -42,7 +42,7 @@ See **[TESTING.md](./TESTING.md)** for inspector payloads, manual WebSocket exam
 ## Quick start (3 steps)
 
 1. **Load the extension** in Chrome (`chrome://extensions` → Load unpacked → this repo folder). Open the popup and set **WS port** if you are not using the default `9009`.
-2. **Run the MCP server** (from `mcp-server/` after `npm install && npm run build`): `npm start` or `node dist/index.js`. Copy the **WebSocket auth token** from stderr into the popup **Auth token** field and click **Save** (or set `POKE_BROWSER_TOKEN` before starting the server and use the same value in the popup).
+2. **Run the MCP server** (from `mcp-server/` after `npm install && npm run build`): `npm start` or `node dist/index.js`. For a fixed secret, set `POKE_BROWSER_TOKEN` and paste the same value into the popup **Auth token**; leave both unset for local dev (no token required).
 3. **Point your MCP client** at the server (e.g. Cursor `mcpServers` with `command` + `args` to run this package, and `env` for `POKE_BROWSER_WS_PORT` / `POKE_BROWSER_TOKEN` as needed). Confirm the popup shows **Connected**.
 
 ## Load the extension in Chrome
@@ -142,7 +142,7 @@ Requirements:
 
 ## Security
 
-- **WebSocket token:** Only clients that send `hello` with the correct token (from `POKE_BROWSER_TOKEN` or the random value logged at startup) stay connected; others receive `auth_error` and the socket is closed.
+- **WebSocket token:** When `POKE_BROWSER_TOKEN` is set, only clients whose `hello` includes that exact token stay connected; mismatches get `auth_error` and the socket closes. When the env var is unset, `hello` is accepted without a token check (localhost dev only).
 - **Origin:** The WebSocket server allows connections with no `Origin` header (Node tooling) or `Origin: chrome-extension://…` (the extension). Other origins get HTTP 4403.
 - **Rate limit:** Up to **30** extension commands per **10 seconds**; further calls return `{ "error": "rate_limit_exceeded", "retryAfter": 10 }` without dropping the socket.
 - **Trust model:** This stack can drive the browser like a user: arbitrary URLs, injected scripts, screenshots, cookies. Use a dedicated Chrome profile, keep the WebSocket on localhost, and only connect MCP clients you trust. Copy `.env.example` to guide local env vars; do not commit real secrets.

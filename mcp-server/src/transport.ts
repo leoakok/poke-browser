@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 
@@ -64,13 +64,14 @@ export type ScreenshotResultPayload = {
 };
 
 /**
- * Shared secret for the extension `hello` handshake. Set `POKE_BROWSER_TOKEN` to pin a value;
- * otherwise a random token is generated each process start (printed to stderr).
+ * When `POKE_BROWSER_TOKEN` is set to a non-empty value (after trim), the extension `hello` must
+ * include the same token. When unset/empty, WebSocket auth is disabled (zero-config / dev mode).
  */
-export function readWebSocketAuthToken(): string {
+export function readOptionalWebSocketAuthToken(): string | undefined {
   const raw = process.env.POKE_BROWSER_TOKEN;
-  if (raw !== undefined && raw !== "") return raw;
-  return randomBytes(24).toString("hex");
+  if (raw === undefined || raw === "") return undefined;
+  const t = raw.trim();
+  return t === "" ? undefined : t;
 }
 
 export class RateLimitError extends Error {
@@ -218,7 +219,8 @@ function waitForWebSocketListening(wss: WebSocketServer): Promise<void> {
 }
 
 export type ExtensionWsServerOptions = {
-  authToken: string;
+  /** Required match for `hello.token` when set. Omitted or empty → auth disabled. */
+  authToken?: string;
 };
 
 function isWsOriginAllowed(origin: string | undefined): boolean {
@@ -233,9 +235,13 @@ function isWsOriginAllowed(origin: string | undefined): boolean {
 export async function startExtensionWebSocketServer(
   port: number,
   b: ExtensionBridge,
-  options: ExtensionWsServerOptions,
+  options: ExtensionWsServerOptions = {},
 ): Promise<WebSocketServer> {
-  const { authToken } = options;
+  const expectedToken =
+    typeof options.authToken === "string" && options.authToken.length > 0
+      ? options.authToken
+      : undefined;
+  const authRequired = expectedToken !== undefined;
   const wss = new WebSocketServer({ port, host: "127.0.0.1" });
   const trackedClients = new Set<WebSocket>();
 
@@ -342,7 +348,8 @@ export async function startExtensionWebSocketServer(
           return;
         }
         const token = typeof msg.token === "string" ? msg.token : "";
-        if (token !== authToken) {
+        if (authRequired && token !== expectedToken) {
+          console.warn("[poke-browser-mcp] WebSocket auth rejected: token mismatch");
           try {
             ws.send(JSON.stringify({ type: "auth_error", error: "invalid_token" }));
           } catch {
@@ -363,7 +370,11 @@ export async function startExtensionWebSocketServer(
           /* ignore */
         }
         startPing();
-        console.error("[poke-browser-mcp] Extension WebSocket client authenticated");
+        console.error(
+          authRequired
+            ? "[poke-browser-mcp] Extension WebSocket client authenticated"
+            : "[poke-browser-mcp] Extension WebSocket client connected (dev mode, no token check)",
+        );
         return;
       }
 

@@ -66,16 +66,15 @@ function sendAndReceive(ws: WebSocket, msg: object): Promise<object> {
 
 // One authenticated client replaces another; run tests one at a time.
 describe.sequential("poke-browser MCP server", () => {
-  it("starts and accepts WebSocket connections", async () => {
+  it("accepts connections and sends welcome", async () => {
     const ws = await connectWs();
     expect(ws.readyState).toBe(WebSocket.OPEN);
-    ws.close();
-  });
-
-  it("sends a welcome message on connect", async () => {
-    const ws = await connectWs();
-    const welcome = await new Promise<object>((resolve) => {
-      ws.once("message", (data) => resolve(JSON.parse(data.toString()) as object));
+    const welcome = await new Promise<object>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error("welcome timeout")), 5000);
+      ws.once("message", (data) => {
+        clearTimeout(t);
+        resolve(JSON.parse(data.toString()) as object);
+      });
     });
     expect(welcome).toMatchObject({ type: "welcome" });
     ws.close();

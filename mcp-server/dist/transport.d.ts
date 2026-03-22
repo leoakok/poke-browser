@@ -17,10 +17,10 @@ export type ScreenshotResultPayload = {
     mimeType: string;
 };
 /**
- * Shared secret for the extension `hello` handshake. Set `POKE_BROWSER_TOKEN` to pin a value;
- * otherwise a random token is generated each process start (printed to stderr).
+ * When `POKE_BROWSER_TOKEN` is set to a non-empty value (after trim), the extension `hello` must
+ * include the same token. When unset/empty, WebSocket auth is disabled (zero-config / dev mode).
  */
-export declare function readWebSocketAuthToken(): string;
+export declare function readOptionalWebSocketAuthToken(): string | undefined;
 export declare class RateLimitError extends Error {
     readonly retryAfter = 10;
     constructor();
@@ -42,11 +42,12 @@ export declare class ExtensionBridge {
 }
 export declare const bridge: ExtensionBridge;
 export type ExtensionWsServerOptions = {
-    authToken: string;
+    /** Required match for `hello.token` when set. Omitted or empty → auth disabled. */
+    authToken?: string;
 };
 /**
  * Binds the extension WebSocket server and resolves only after the port is listening
  * (avoids ERR_CONNECTION_REFUSED races with early client connects).
  */
-export declare function startExtensionWebSocketServer(port: number, b: ExtensionBridge, options: ExtensionWsServerOptions): Promise<WebSocketServer>;
+export declare function startExtensionWebSocketServer(port: number, b: ExtensionBridge, options?: ExtensionWsServerOptions): Promise<WebSocketServer>;
 //# sourceMappingURL=transport.d.ts.map
