@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>OIHS Invoice</title>
+<style>
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 595.5pt;
+    height: 842.25pt;
+    background: #ffffff;
+    font-family: Arial, Helvetica, sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    color: #222222;
+  }
+
+  .page {
+    position: relative;
+    width: 595.5pt;
+    height: 842.25pt;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  .border {
+    border: 1pt solid #7d93a3;
+  }
+
+  .border td,
+  .border th {
+    border: 1pt solid #7d93a3;
+  }
+
+  .logo {
+    position: absolute;
+    left: 40pt;
+    top: 24pt;
+    width: 165pt;
+    height: auto;
+    display: block;
+  }
+
+  .invoice-title {
+    position: absolute;
+    right: 44pt;
+    top: 66pt;
+    font-size: 15.0057pt;
+    font-weight: 700;
+    line-height: 1;
+    color: #222222;
+  }
+
+  .company {
+    position: absolute;
+    left: 40pt;
+    top: 104pt;
+    width: 255pt;
+    font-size: 12.0045pt;
+    line-height: 1.7;
+    color: #222222;
+  }
+
+  .company .name {
+    font-size: 12.0045pt;
+    font-weight: 700;
+    margin-bottom: 4pt;
+  }
+
+  .company b {
+    font-weight: 700;
+  }
+
+  .meta {
+    position: absolute;
+    right: 42pt;
+    top: 100pt;
+    width: 165pt;
+    border-collapse: collapse;
+  }
+
+  .meta td {
+    padding: 5pt 8pt;
+    vertical-align: middle;
+  }
+
+  .meta .label {
+    width: 83pt;
+    background: #f5003c;
+    color: #ffffff;
+    text-align: right;
+    white-space: nowrap;
+    font-size: 9.0559pt;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .meta .value {
+    width: 82pt;
+    background: #ffffff;
+    color: #222222;
+    font-size: 10.1138pt;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .meta .currency {
+    font-size: 10.1138pt;
+    font-weight: 400;
+    text-align: center;
+  }
+
+  .payment-terms-head {
+    position: absolute;
+    left: 40pt;
+    top: 238pt;
+    width: 515pt;
+    height: 20pt;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f5003c;
+    color: #ffffff;
+    border: 1pt solid #7d93a3;
+    font-size: 12.0045pt;
+    font-weight: 400;
+    line-height: 1;
+  }
+
+  .payment-terms-body {
+    position: absolute;
+    left: 40pt;
+    top: 258pt;
+    width: 515pt;
+    height: 24pt;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #ffffff;
+    border-left: 1pt solid #7d93a3;
+    border-right: 1pt solid #7d93a3;
+    border-bottom: 1pt solid #7d93a3;
+    font-size: 12.0045pt;
+    font-weight: 400;
+    line-height: 1;
+  }
+
+  .payment-terms-body b {
+    font-size: 10.1138pt;
+    font-weight: 700;
+  }
+
+  .products {
+    position: absolute;
+    left: 40pt;
+    top: 290pt;
+    width: 515pt;
+    border-collapse: collapse;
+  }
+
+  .products th {
+    background: #f5003c;
+    color: #ffffff;
+    text-align: center;
+    vertical-align: middle;
+    padding: 5pt 4pt;
+    font-size: 12.0045pt;
+    font-weight: 400;
+    line-height: 1;
+  }
+
+  .products td {
+    background: #ffffff;
+    color: #222222;
+    text-align: center;
+    vertical-align: middle;
+    padding: 11pt 4pt;
+    font-size: 12.0045pt;
+    font-weight: 400;
+    line-height: 1.05;
+  }
+
+  .products .item {
+    font-size: 10.1138pt;
+    font-weight: 700;
+  }
+
+  .products .amount {
+    font-size: 10.1138pt;
+    font-weight: 700;
+    line-height: 1.05;
+  }
+
+  .invoice-to-head {
+    position: absolute;
+    left: 40pt;
+    top: 430pt;
+    width: 236pt;
+    height: 38pt;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f5003c;
+    color: #ffffff;
+    border: 1pt dotted #a9a9a9;
+    border-bottom: none;
+    font-size: 12.0045pt;
+    font-weight: 700;
+    line-height: 1;
+  }
+
+  .invoice-to-body {
+    position: absolute;
+    left: 40pt;
+    top: 468pt;
+    width: 236pt;
+    height: 78pt;
+    padding: 12pt 10pt;
+    border-left: 1pt dotted #a9a9a9;
+    border-right: 1pt dotted #a9a9a9;
+    border-bottom: 1pt dotted #a9a9a9;
+    text-align: center;
+    font-size: 10.1138pt;
+    font-weight: 700;
+    line-height: 1.65;
+    color: #222222;
+  }
+
+  .cta {
+    position: absolute;
+    left: 307pt;
+    top: 468pt;
+    width: 248pt;
+    height: 38pt;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f5003c;
+    color: #ffffff;
+    font-size: 12.0045pt;
+    font-weight: 400;
+    line-height: 1;
+    text-align: center;
+    padding: 0 8pt;
+  }
+
+  .card {
+    position: absolute;
+    top: 560pt;
+    min-height: 142pt;
+    border: 1pt solid #7d93a3;
+    background: #ffffff;
+  }
+
+  .card.left {
+    left: 40pt;
+    width: 236pt;
+  }
+
+  .card.right {
+    left: 307pt;
+    width: 248pt;
+  }
+
+  .card-head {
+    background: #f5003c;
+    color: #ffffff;
+    padding: 4pt 8pt;
+    line-height: 1.15;
+    font-weight: 700;
+    font-size: 8.0105pt;
+  }
+
+  .card-body {
+    padding: 10pt 12pt 10pt 12pt;
+    color: #222222;
+    overflow: hidden;
+  }
+
+  .card.left .card-body {
+    font-size: 8.9pt;
+    line-height: 1.72;
+    font-weight: 400;
+  }
+
+  .card.right .card-body {
+    font-size: 8.8227pt;
+    line-height: 1.82;
+    font-weight: 400;
+  }
+
+  .card-body b {
+    font-weight: 700;
+  }
+
+  .bullet {
+    padding-left: 12pt;
+    text-indent: -8pt;
+    margin-top: 2pt;
+  }
+
+  .footer {
+    position: absolute;
+    left: 52pt;
+    top: 790pt;
+    width: 492pt;
+    text-align: center;
+    font-size: 9.0034pt;
+    font-weight: 400;
+    line-height: 1.1;
+    color: #222222;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <img class="logo" src="https://github.com/oihsca/cdn/blob/main/banner.png?raw=true" alt="OIHS Logo">
+
+  <div class="invoice-title">INVOICE</div>
+
+  <div class="company">
+    <div class="name">Acan Next Learning Corporation</div>
+    <div><b>Business Address:</b> 33 Bloor Street East, Unit</div>
+    <div>606,</div>
+    <div>Toronto, ON, M4W 3H1</div>
+    <div><b>Business Phone:</b> +1 (437) 446-5771</div>
+    <div><b>Business Number (BN):</b> 789553864</div>
+  </div>
+
+  <table class="meta border">
+    <tr>
+      <td class="label">Invoice Number</td>
+      <td class="value">[[[Invoice Number]]]</td>
+    </tr>
+    <tr>
+      <td class="label">Invoice Date</td>
+      <td class="value">[[[Invoice Date]]]</td>
+    </tr>
+    <tr>
+      <td class="label">Due Date</td>
+      <td class="value">[[[Payment Date]]]</td>
+    </tr>
+    <tr>
+      <td class="label">Invoice Currency</td>
+      <td class="value currency">CAD</td>
+    </tr>
+  </table>
+
+  <div class="payment-terms-head">Payment Terms</div>
+  <div class="payment-terms-body">Due by <b>&nbsp;[[[Payment Date]]]</b></div>
+
+  <table class="products border">
+    <thead>
+      <tr>
+        <th style="width:30pt;">&nbsp;</th>
+        <th style="width:164pt;">Product Name</th>
+        <th style="width:34pt;">Qty</th>
+        <th style="width:68pt;">List Price</th>
+        <th style="width:50pt;">Disc.</th>
+        <th style="width:68pt;">Unit Price</th>
+        <th style="width:44pt;">Tax</th>
+        <th style="width:57pt;">Net Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>1</td>
+        <td class="item">[[[Product]]]</td>
+        <td>1</td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td class="amount">[[[Payment<br>Amount]]]</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="invoice-to-head">Invoice to</div>
+  <div class="invoice-to-body">
+    [[[Parent Full Name]]]<br>
+    [[[Billing Address]]]
+  </div>
+
+  <div class="cta">Learn More About Payment Options</div>
+
+  <div class="card left">
+    <div class="card-head">Payment via Flywire (Secure International Payment)</div>
+    <div class="card-body">
+      <div><b>Flywire is our preferred method for international student payments.</b></div>
+      <div class="bullet">&#8226; No Hidden Fees: Competitive exchange rates with no unexpected charges.</div>
+      <div class="bullet">&#8226; Track Your Payment: Receive real-time updates on your transaction.</div>
+      <div class="bullet">&#8226; 24/7 Support: Access multilingual customer support anytime.</div>
+    </div>
+  </div>
+
+  <div class="card right">
+    <div class="card-head">International Wire Transfer</div>
+    <div class="card-body">
+      Account Name:&nbsp;&nbsp;<b>Acan Next Learning Corporation</b><br>
+      Bank Name:&nbsp;&nbsp;<b>CIBC</b><br>
+      SWIFT:&nbsp;&nbsp;<b>CIBCCATTXXX</b><br>
+      Account No:&nbsp;&nbsp;<b>1047019</b><br>
+      Transit No:&nbsp;&nbsp;<b>08362</b><br>
+      Institution No:&nbsp;&nbsp;<b>010</b>
+    </div>
+  </div>
+
+  <div class="footer">
+    Acan Next Learning (OIHS) | 33 Bloor Street East, Unit 606, Toronto, ON, M4W 3H1 | BN: 789553864 | +1 (437) 446-5771
+  </div>
+
+</div>
+</body>
+</html>

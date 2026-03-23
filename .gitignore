@@ -1,2 +1,8 @@
+node_modules/
+mcp-server/dist/
+mcp-server/extension/
+mcp-server/node_modules/
 .DS_Store
-**/node_modules/
+.env
+*.log
+.npmrc

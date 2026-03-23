@@ -151,6 +151,8 @@ function ensurePokeLoginForTunnel() {
 }
 
 function extensionFolderPath() {
+  const inPkg = join(root, "extension");
+  if (existsSync(inPkg)) return inPkg;
   return join(root, "..", "extension");
 }
 

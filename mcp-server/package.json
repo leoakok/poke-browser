@@ -1,6 +1,6 @@
 {
   "name": "@leokok/poke-browser",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "MCP server + WebSocket bridge for the poke-browser Chrome extension",
   "type": "module",
   "engines": {
@@ -12,7 +12,8 @@
   "files": [
     "dist",
     "cli.mjs",
-    "README.md"
+    "README.md",
+    "extension"
   ],
   "scripts": {
     "build": "tsc",
@@ -24,7 +25,9 @@
     "inspector": "npx @modelcontextprotocol/inspector node dist/index.js",
     "inspector:dev": "npx @modelcontextprotocol/inspector node cli.mjs",
     "test": "vitest run tests/",
-    "test:watch": "vitest tests/"
+    "test:watch": "vitest tests/",
+    "prepack": "cp -r ../extension ./extension 2>/dev/null || true",
+    "postpack": "rm -rf ./extension"
   },
   "keywords": [
     "poke",

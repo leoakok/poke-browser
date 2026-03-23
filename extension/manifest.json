@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "poke-browser",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Browser automation bridge for MCP agents via WebSocket.",
   "permissions": [
     "tabs",
@@ -21,7 +21,12 @@
   },
   "action": {
     "default_title": "poke-browser",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon.png",
+      "48": "icon.png",
+      "128": "icon.png"
+    }
   },
   "content_scripts": [
     {
@@ -34,5 +39,10 @@
       "run_at": "document_idle",
       "all_frames": false
     }
-  ]
+  ],
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
 }
