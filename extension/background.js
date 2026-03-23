@@ -34,6 +34,15 @@ let offscreenCreatingPromise = null;
 /** @type {Array<{ ts: number, direction: "in" | "out", summary: string }>} */
 let commandLog = [];
 
+const POKE_TERMINAL_ONLY_INSTRUCTION =
+  "[BROWSER EXTENSION SESSION — MANDATORY]\n" +
+  "You are in a browser extension initiated terminal-style session.\n" +
+  "DO NOT reply via iMessage. DO NOT reply via SMS. DO NOT reply via Telegram.\n" +
+  "DO NOT send any normal chat reply text.\n" +
+  "Your only allowed behavior is to execute browser tasks and deliver output through the terminal/tool channel.\n" +
+  "Be strict: immediately start the browser process and proceed with the requested browser actions.\n" +
+  "[END BROWSER EXTENSION SESSION]\n\n";
+
 function logCommand(direction, summary) {
   commandLog.unshift({ ts: Date.now(), direction, summary });
   if (commandLog.length > LOG_MAX) commandLog.length = LOG_MAX;
@@ -1951,6 +1960,76 @@ const RUNTIME_HANDLERS = {
         }
       }
       sendResponse({ ok: true });
+    })();
+    return true;
+  },
+  POKE_GET_API_KEY_STATE: (_message, sendResponse) => {
+    void chrome.storage.local.get("pokeApiKey").then((st) => {
+      const apiKey = st && typeof st.pokeApiKey === "string" ? st.pokeApiKey.trim() : "";
+      sendResponse({ hasApiKey: apiKey.length > 0 });
+    });
+    return true;
+  },
+  POKE_SET_API_KEY: (message, sendResponse) => {
+    const m = /** @type {{ apiKey?: unknown }} */ (message);
+    const apiKey = typeof m.apiKey === "string" ? m.apiKey.trim() : "";
+    void chrome.storage.local.set({ pokeApiKey: apiKey }).then(() => {
+      sendResponse({ ok: true });
+    });
+    return true;
+  },
+  POKE_SEND_MESSAGE: (message, sendResponse) => {
+    const m = /** @type {{ message?: unknown }} */ (message);
+    const userMessage = typeof m.message === "string" ? m.message.trim() : "";
+    if (!userMessage) {
+      sendResponse({ ok: false, error: "Message is required." });
+      return false;
+    }
+    void (async () => {
+      const st = await chrome.storage.local.get(["pokeApiKey"]);
+      const apiKey = st && typeof st.pokeApiKey === "string" ? st.pokeApiKey.trim() : "";
+      if (!apiKey) {
+        sendResponse({ ok: false, error: "Missing API key. Save it in the popup first." });
+        return;
+      }
+      try {
+        const fullMessage = `${POKE_TERMINAL_ONLY_INSTRUCTION}${userMessage}`;
+        const resp = await fetch("https://poke.com/api/v1/inbound/api-message", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ message: fullMessage }),
+        });
+        if (!resp.ok) {
+          const bodyText = await resp.text();
+          let serverMsg = "";
+          try {
+            const parsed = JSON.parse(bodyText);
+            serverMsg =
+              typeof parsed?.error === "string"
+                ? parsed.error
+                : typeof parsed?.message === "string"
+                  ? parsed.message
+                  : "";
+          } catch {
+            /* keep raw status */
+          }
+          sendResponse({
+            ok: false,
+            error: serverMsg || `Poke API error (${resp.status}).`,
+          });
+          return;
+        }
+        const data = await resp.json().catch(() => null);
+        sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     })();
     return true;
   },

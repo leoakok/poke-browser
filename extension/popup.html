@@ -185,6 +185,81 @@
         margin-bottom: 14px;
       }
 
+      .form-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+
+      .form-label {
+        display: block;
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 6px;
+      }
+
+      .form-input,
+      .form-textarea {
+        width: 100%;
+        padding: 8px 10px;
+        font-size: 12px;
+        font-family: inherit;
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 6px;
+        color: var(--text-primary);
+        outline: none;
+      }
+
+      .form-input:focus,
+      .form-textarea:focus {
+        border-color: var(--accent-muted);
+      }
+
+      .form-textarea {
+        resize: vertical;
+        min-height: 72px;
+        max-height: 180px;
+      }
+
+      .actions-row {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+
+      .btn {
+        border: 1px solid #333;
+        border-radius: 6px;
+        background: #161616;
+        color: var(--text-primary);
+        font-size: 12px;
+        padding: 7px 10px;
+        cursor: pointer;
+      }
+
+      .btn:hover {
+        background: #1e1e1e;
+      }
+
+      .btn.primary {
+        border-color: #5b21b6;
+        background: #4c1d95;
+      }
+
+      .btn.primary:hover {
+        background: #5b21b6;
+      }
+
+      .mini-status {
+        margin-top: 8px;
+        font-size: 11px;
+        color: var(--text-muted);
+        min-height: 14px;
+      }
+
       .toggle-label {
         font-size: 13px;
         color: var(--text-primary);
@@ -399,6 +474,32 @@
         <span class="slider"></span>
       </label>
     </div>
+
+    <section class="form-card">
+      <label class="form-label" for="api-key-input">Poke API key (stored locally in this extension)</label>
+      <input
+        id="api-key-input"
+        class="form-input"
+        type="password"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder="pk_..."
+      />
+      <div class="actions-row">
+        <button type="button" id="save-api-key-btn" class="btn">Save key</button>
+        <button type="button" id="clear-api-key-btn" class="btn">Clear key</button>
+      </div>
+      <div class="mini-status" id="api-key-status"></div>
+    </section>
+
+    <section class="form-card">
+      <label class="form-label" for="poke-message-input">Send message to Poke (strict browser session mode)</label>
+      <textarea id="poke-message-input" class="form-textarea" placeholder="Tell Poke what to do in the browser..."></textarea>
+      <div class="actions-row">
+        <button type="button" id="send-poke-message-btn" class="btn primary">Send</button>
+      </div>
+      <div class="mini-status" id="poke-send-status"></div>
+    </section>
 
     <div class="logs-section" id="logsSection">
       <button type="button" class="logs-header" id="logsToggle" aria-expanded="false" aria-controls="logsCollapse">

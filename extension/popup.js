@@ -10,6 +10,13 @@ const versionEl = document.getElementById("version");
 const logsSection = document.getElementById("logsSection");
 const logsToggle = document.getElementById("logsToggle");
 const disconnectedHint = document.getElementById("disconnected-hint");
+const apiKeyInput = document.getElementById("api-key-input");
+const saveApiKeyBtn = document.getElementById("save-api-key-btn");
+const clearApiKeyBtn = document.getElementById("clear-api-key-btn");
+const apiKeyStatus = document.getElementById("api-key-status");
+const pokeMessageInput = document.getElementById("poke-message-input");
+const sendPokeMessageBtn = document.getElementById("send-poke-message-btn");
+const pokeSendStatus = document.getElementById("poke-send-status");
 
 const { version } = chrome.runtime.getManifest();
 
@@ -149,6 +156,76 @@ async function load() {
   if (mcpEnabled) mcpEnabled.checked = enabled;
 
   await syncFromBackgroundStatus();
+
+  try {
+    const keyState = await chrome.runtime.sendMessage({ type: "POKE_GET_API_KEY_STATE" });
+    if (keyState?.hasApiKey) {
+      if (apiKeyStatus) apiKeyStatus.textContent = "API key saved.";
+      if (apiKeyInput) apiKeyInput.placeholder = "Saved (enter a new key to replace)";
+    } else if (apiKeyStatus) {
+      apiKeyStatus.textContent = "No API key saved.";
+    }
+  } catch {
+    if (apiKeyStatus) apiKeyStatus.textContent = "Could not read API key state.";
+  }
+}
+
+async function saveApiKey() {
+  const key = apiKeyInput?.value?.trim() ?? "";
+  if (!key) {
+    if (apiKeyStatus) apiKeyStatus.textContent = "Enter an API key first.";
+    return;
+  }
+  if (apiKeyStatus) apiKeyStatus.textContent = "Saving...";
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "POKE_SET_API_KEY", apiKey: key });
+    if (res?.ok) {
+      if (apiKeyInput) apiKeyInput.value = "";
+      if (apiKeyStatus) apiKeyStatus.textContent = "API key saved.";
+    } else if (apiKeyStatus) {
+      apiKeyStatus.textContent = "Failed to save API key.";
+    }
+  } catch {
+    if (apiKeyStatus) apiKeyStatus.textContent = "Failed to save API key.";
+  }
+}
+
+async function clearApiKey() {
+  if (apiKeyStatus) apiKeyStatus.textContent = "Clearing...";
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "POKE_SET_API_KEY", apiKey: "" });
+    if (res?.ok) {
+      if (apiKeyInput) apiKeyInput.value = "";
+      if (apiKeyStatus) apiKeyStatus.textContent = "API key cleared.";
+    } else if (apiKeyStatus) {
+      apiKeyStatus.textContent = "Failed to clear API key.";
+    }
+  } catch {
+    if (apiKeyStatus) apiKeyStatus.textContent = "Failed to clear API key.";
+  }
+}
+
+async function sendPokeMessage() {
+  const message = pokeMessageInput?.value?.trim() ?? "";
+  if (!message) {
+    if (pokeSendStatus) pokeSendStatus.textContent = "Enter a message first.";
+    return;
+  }
+  if (pokeSendStatus) pokeSendStatus.textContent = "Sending...";
+  if (sendPokeMessageBtn) sendPokeMessageBtn.disabled = true;
+  try {
+    const res = await chrome.runtime.sendMessage({ type: "POKE_SEND_MESSAGE", message });
+    if (res?.ok) {
+      if (pokeSendStatus) pokeSendStatus.textContent = "Message sent to Poke.";
+      if (pokeMessageInput) pokeMessageInput.value = "";
+    } else {
+      if (pokeSendStatus) pokeSendStatus.textContent = res?.error ? String(res.error) : "Failed to send message.";
+    }
+  } catch {
+    if (pokeSendStatus) pokeSendStatus.textContent = "Failed to send message.";
+  } finally {
+    if (sendPokeMessageBtn) sendPokeMessageBtn.disabled = false;
+  }
 }
 
 chrome.runtime.onMessage.addListener((msg) => {
@@ -199,6 +276,32 @@ mcpEnabled?.addEventListener("change", async () => {
     /* extension invalidated */
   }
   await syncFromBackgroundStatus();
+});
+
+saveApiKeyBtn?.addEventListener("click", () => {
+  void saveApiKey();
+});
+
+clearApiKeyBtn?.addEventListener("click", () => {
+  void clearApiKey();
+});
+
+apiKeyInput?.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    void saveApiKey();
+  }
+});
+
+sendPokeMessageBtn?.addEventListener("click", () => {
+  void sendPokeMessage();
+});
+
+pokeMessageInput?.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    e.preventDefault();
+    void sendPokeMessage();
+  }
 });
 
 checkForUpdates();
