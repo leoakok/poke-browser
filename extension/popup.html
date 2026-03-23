@@ -116,6 +116,63 @@
         word-break: break-all;
       }
 
+      .url-edit-row {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        max-width: 100%;
+      }
+
+      #url-display {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 12px;
+        color: var(--text-muted);
+        word-break: break-all;
+        flex: 1;
+        min-width: 0;
+      }
+
+      #url-input {
+        flex: 1;
+        min-width: 0;
+        padding: 4px 8px;
+        font-size: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        color: var(--text-primary);
+        outline: none;
+      }
+
+      #url-input:focus {
+        border-color: var(--accent-muted);
+      }
+
+      .url-icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        padding: 2px;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--text-muted);
+        cursor: pointer;
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+
+      .url-icon-btn:hover {
+        color: var(--text-primary);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
       .toggle-row {
         display: flex;
         align-items: center;
@@ -296,7 +353,39 @@
         <span class="dot disconnected" id="statusDot" aria-hidden="true"></span>
         <span id="statusText">Disconnected</span>
       </div>
-      <div class="port-url" id="portUrl">ws://localhost:9009</div>
+      <div class="url-edit-row" id="urlEditRow">
+        <span id="url-display"></span>
+        <button type="button" id="url-edit-btn" class="url-icon-btn" aria-label="Edit WebSocket URL" title="Edit URL">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path
+              d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path
+              d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+        <input type="text" id="url-input" class="hidden" spellcheck="false" autocomplete="off" aria-label="WebSocket URL" />
+        <button type="button" id="url-ok-btn" class="url-icon-btn hidden" aria-label="Save URL" title="Save">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+        <button type="button" id="url-cancel-btn" class="url-icon-btn hidden" aria-label="Cancel editing" title="Cancel">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18" stroke="#ef4444" stroke-width="2" stroke-linecap="round" />
+            <line x1="6" y1="6" x2="18" y2="18" stroke="#ef4444" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
     </section>
 
     <div class="toggle-row">

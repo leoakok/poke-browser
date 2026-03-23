@@ -7,11 +7,18 @@
  * supported bridge when the service worker may suspend.
  */
 
-/** Offscreen documents cannot use chrome.storage; port comes from the document URL (set by background). */
+/** Offscreen documents cannot use chrome.storage; port / ws URL come from the document URL (set by background). */
 const params = new URLSearchParams(location.search);
 let mcpPort = Number.parseInt(params.get("port") ?? "9009", 10);
 if (!Number.isFinite(mcpPort) || mcpPort <= 0 || mcpPort > 65535) {
   mcpPort = 9009;
+}
+
+/** When set, used as the full WebSocket URL; otherwise `ws://127.0.0.1:${mcpPort}` is used. */
+let mcpWsUrl = /** @type {string | null} */ (null);
+const wsFromQuery = params.get("wsUrl");
+if (wsFromQuery && wsFromQuery.trim()) {
+  mcpWsUrl = wsFromQuery.trim();
 }
 
 const WS_INITIAL_RETRY_MS = 1000;
@@ -92,7 +99,7 @@ function connectMcpSocket() {
   }
 
   notifyStatus("connecting");
-  const url = `ws://127.0.0.1:${mcpPort}`;
+  const url = mcpWsUrl && mcpWsUrl.length > 0 ? mcpWsUrl : `ws://127.0.0.1:${mcpPort}`;
   console.log("[poke-browser offscreen] Connecting to", url);
   try {
     socket = new WebSocket(url);
@@ -190,8 +197,11 @@ function handleFromBg(msg) {
     return;
   }
   if (msg.type === "reconnect") {
-    if (typeof msg.port === "number" && Number.isFinite(msg.port) && msg.port > 0 && msg.port < 65536) {
+    if (typeof msg.wsUrl === "string" && msg.wsUrl.trim()) {
+      mcpWsUrl = msg.wsUrl.trim();
+    } else if (typeof msg.port === "number" && Number.isFinite(msg.port) && msg.port > 0 && msg.port < 65536) {
       mcpPort = Math.trunc(msg.port);
+      mcpWsUrl = null;
     }
     clearReconnectTimer();
     resetWebSocketBackoff();

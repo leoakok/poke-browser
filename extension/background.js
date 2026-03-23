@@ -115,7 +115,9 @@ async function setupOffscreen() {
         console.error("[poke-browser ext] hasDocument check failed:", e);
       }
 
-      const stored = await chrome.storage.local.get("wsPort");
+      const stored = await chrome.storage.local.get(["wsPort", "wsUrl"]);
+      const storedWsUrl =
+        typeof stored.wsUrl === "string" && stored.wsUrl.trim() ? stored.wsUrl.trim() : "";
       const raw = stored.wsPort;
       const port =
         typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw < 65536
@@ -123,7 +125,11 @@ async function setupOffscreen() {
           : DEFAULT_WS_PORT;
 
       const docUrl = new URL(chrome.runtime.getURL("offscreen.html"));
-      docUrl.searchParams.set("port", String(port));
+      if (storedWsUrl) {
+        docUrl.searchParams.set("wsUrl", storedWsUrl);
+      } else {
+        docUrl.searchParams.set("port", String(port));
+      }
 
       try {
         await chrome.offscreen.createDocument({
@@ -1951,6 +1957,27 @@ const RUNTIME_HANDLERS = {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message && typeof message === "object" && message.action === "reconnect") {
+    const wsUrl =
+      typeof message.wsUrl === "string" && message.wsUrl.trim() ? message.wsUrl.trim() : "";
+    void (async () => {
+      if (wsUrl) {
+        await chrome.storage.local.set({ wsUrl });
+      }
+      if (!(await getPokeEnabled())) {
+        sendResponse({ ok: true });
+        return;
+      }
+      await ensureOffscreenAndSchedule();
+      try {
+        bridgePort?.postMessage(wsUrl ? { type: "reconnect", wsUrl } : { type: "reconnect" });
+      } catch {
+        /* ignore */
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
   if (message && typeof message === "object" && message.action === "setPokeBrowserEnabled") {
     const enabled = message.enabled === true;
     void (async () => {
