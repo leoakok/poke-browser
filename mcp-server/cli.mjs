@@ -397,7 +397,14 @@ if (!existsSync(entry)) {
     console.error("");
     const r = spawnSync(
       process.execPath,
-      [entry, "--http", String(mcpPort), "--tunnel", ...resolvedChildArgs],
+      [
+        entry,
+        "--http",
+        String(mcpPort),
+        "--tunnel",
+        ...(customMcpName ? ["--name", customMcpName] : []),
+        ...resolvedChildArgs,
+      ],
       { stdio: "inherit", env: envWithPorts },
     );
     process.exit(r.status ?? 1);
