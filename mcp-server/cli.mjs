@@ -4,14 +4,21 @@
  * Auth: `npx poke@latest whoami` / `poke login` — not POKE_API_KEY.
  * Tunnel: `npx poke@latest tunnel <local /mcp URL> -n "<label>"` (stdio inherit).
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stderr as output } from "node:process";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const entry = join(root, "dist", "index.js");
+
+const README_URL = "https://github.com/leoakok/poke-browser";
+const README_README_URL = `${README_URL}#readme`;
+const WELCOME_MARKER = join(homedir(), ".poke-browser-welcomed");
+const DEFAULT_WS_PORT = 9009;
 
 const rawArgs = process.argv.slice(2);
 
@@ -86,12 +93,98 @@ function ensurePokeLoginForTunnel() {
   return true;
 }
 
-function printTunnelBanner() {
+/** Mirrors `readPort()` in `src/transport.ts` (WebSocket port before child spawns). */
+function readWebSocketPort() {
+  const raw = process.env.POKE_BROWSER_WS_PORT ?? process.env.WS_PORT;
+  if (raw === undefined || raw === "") return DEFAULT_WS_PORT;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+    console.error(
+      `Invalid POKE_BROWSER_WS_PORT="${raw}", falling back to ${DEFAULT_WS_PORT}`,
+    );
+    return DEFAULT_WS_PORT;
+  }
+  return Math.trunc(n);
+}
+
+function extensionFolderPath() {
+  return join(root, "..", "extension");
+}
+
+function openReadmeInBrowser(url) {
+  try {
+    const require = createRequire(import.meta.url);
+    require.resolve("open");
+    const open = require("open");
+    const p = open(url);
+    if (p && typeof p.catch === "function") void p.catch(() => {});
+  } catch {
+    try {
+      if (process.platform === "darwin") {
+        spawnSync("open", [url], { stdio: "ignore" });
+      } else if (process.platform === "win32") {
+        spawnSync("cmd", ["/c", "start", "", url], {
+          stdio: "ignore",
+          shell: false,
+        });
+      } else {
+        spawnSync("xdg-open", [url], { stdio: "ignore" });
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * First run: full Chrome extension steps + optional README in browser (marker).
+ * Later runs: one line with WebSocket port and docs link.
+ */
+function printMcpStartupOnboarding() {
   const { name, version } = pkgJson();
-  console.error(color.dim("  ─────────────────────────────────────────"));
-  console.error(`  ${color.bold(name)}  ${color.dim(`v${version}`)}`);
-  console.error(color.dim("  ─────────────────────────────────────────"));
-  console.error("");
+  const wsPort = readWebSocketPort();
+  const extPath = extensionFolderPath();
+
+  if (!existsSync(WELCOME_MARKER)) {
+    console.error(color.dim("  ═══════════════════════════════════════════"));
+    console.error(`  ${color.bold(name)}  ${color.dim(`v${version}`)}`);
+    console.error(color.dim("  ═══════════════════════════════════════════"));
+    console.error("");
+    console.error(color.bold("  Set up the Chrome extension:"));
+    console.error("");
+    console.error(
+      `  ${color.bold("Step 1:")} Open Chrome and go to ${color.dim("chrome://extensions")}`,
+    );
+    console.error(
+      `  ${color.bold("Step 2:")} Enable Developer Mode (toggle in top right)`,
+    );
+    console.error(
+      `  ${color.bold("Step 3:")} Click ${color.dim("Load unpacked")} and select this folder:`,
+    );
+    console.error(`         ${color.green(extPath)}`);
+    console.error(
+      `  ${color.bold("Step 4:")} The Poke Browser extension is now active. It will auto-connect to this MCP server.`,
+    );
+    console.error("");
+    console.error(
+      `  ${color.bold("WebSocket port:")} ${color.green(String(wsPort))} (override with ${color.dim("POKE_BROWSER_WS_PORT")})`,
+    );
+    console.error(
+      `  ${color.bold("Docs:")} ${color.dim(README_README_URL)}`,
+    );
+    console.error("");
+    openReadmeInBrowser(README_README_URL);
+    try {
+      writeFileSync(WELCOME_MARKER, "", "utf8");
+    } catch {
+      /* ignore */
+    }
+    return;
+  }
+
+  console.error(
+    `${color.bold(`[${name}]`)} v${version} — WebSocket port ${color.green(String(wsPort))} · ${color.dim(README_README_URL)}`,
+  );
 }
 
 if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
@@ -161,13 +254,9 @@ if (!existsSync(entry)) {
   process.exit(1);
 }
 
-const { name, version } = pkgJson();
-console.error(
-  `[${name}] v${version} — starting (extension WS: env POKE_BROWSER_WS_PORT; HTTP MCP: --http / --tunnel)`,
-);
+printMcpStartupOnboarding();
 
 if (wantPokeTunnelFlow) {
-  printTunnelBanner();
   if (!ensurePokeLoginForTunnel()) {
     process.exit(1);
   }
