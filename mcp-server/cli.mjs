@@ -212,7 +212,7 @@ Usage:
   poke-browser --poke-tunnel      HTTP MCP + Poke tunnel (same auth/tunnel pattern as poke-apple-music)
   poke-browser --http [port]      Streamable HTTP MCP on 127.0.0.1 (default: env POKE_BROWSER_MCP_PORT or 8755)
   poke-browser --tunnel [port]    Same as --http, then: npx poke@latest tunnel …/mcp
-  poke-browser --name <label>     Poke tunnel -n label and MCP server id (default: poke-browser)
+  poke-browser --name <label>     Poke tunnel -n label and MCP server id — implies --poke-tunnel
   poke-browser --debug            Verbose stderr ([poke-browser], WebSocket port, MCP debug)
   poke-browser --verbose          Same as --debug
 
@@ -241,9 +241,13 @@ if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
 }
 
 const wantBuild = rawArgs.includes("--build");
+
+// --name implies the poke-tunnel flow: the user wants a public tunnel with a custom label.
 const wantPokeTunnelFlow =
   process.env.npm_lifecycle_event === "start:tunnel" ||
-  rawArgs.includes("--poke-tunnel");
+  rawArgs.includes("--poke-tunnel") ||
+  !!customMcpName;
+
 const childArgs = rawArgs.filter((a, i, arr) => {
   if (
     a === "--build" ||
