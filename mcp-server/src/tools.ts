@@ -227,7 +227,7 @@ export function registerTools(mcp: McpServer): void {
     "click_element",
     {
       description:
-        "Click via CSS selector / XPath (content script) or viewport coordinates (Chrome DevTools Protocol). Provide either selector or x+y.",
+        "Click via CSS selector / XPath (content script) or viewport coordinates (Chrome DevTools Protocol). Provide either selector or x+y. After clicking, it is highly recommended to inspect the DOM (e.g., using get_dom_snapshot) to detect any new modals or UI changes that may have appeared.",
       inputSchema: {
         selector: z
           .string()
@@ -239,6 +239,10 @@ export function registerTools(mcp: McpServer): void {
         tabId: tabIdSchema.optional(),
       },
     },
+    /**
+     * Click via CSS selector / XPath (content script) or viewport coordinates (Chrome DevTools Protocol). Provide either selector or x+y.
+     * After clicking, it is highly recommended to inspect the DOM (e.g., using get_dom_snapshot) to detect any new modals or UI changes that may have appeared.
+     */
     async ({ selector, x, y, tabId }) => callTool("click_element", { selector, x, y, tabId })
   );
 
