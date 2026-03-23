@@ -45,6 +45,13 @@ export function toolError(text: string): CallToolResult {
   return { isError: true as const, content: [{ type: "text" as const, text }] };
 }
 
+/** CDP hover settle time before the click (coordinate path orchestrated here; selector path in extension). */
+const CLICK_ELEMENT_HOVER_DELAY_MS = 1000;
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function parseUploadSuccessJson(body: string): { mediaId: string; url: string } | null {
   let parsed: unknown;
   try {
@@ -115,6 +122,43 @@ async function callTool(
   }
 }
 
+async function handleClickElementTool(args: {
+  selector?: string;
+  x?: number;
+  y?: number;
+  tabId?: number;
+}): Promise<CallToolResult> {
+  const timeoutMs = PENDING_REQUEST_TIMEOUT_MS + CLICK_ELEMENT_HOVER_DELAY_MS + 3000;
+  logToolCall("click_element", args);
+  if (!bridge.isReady()) {
+    return toolError(extensionBridgeDisconnectedMessage());
+  }
+  const { selector, x, y, tabId } = args;
+  const hasXY =
+    typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y);
+  const hasSelector = typeof selector === "string" && selector.length > 0;
+
+  try {
+    if (hasXY) {
+      await bridge.request("hover_element", { x, y, tabId }, timeoutMs);
+      await sleepMs(CLICK_ELEMENT_HOVER_DELAY_MS);
+      const result = await bridge.request("click_element", { x, y, tabId }, timeoutMs);
+      return toolText(result);
+    }
+    if (hasSelector) {
+      const result = await bridge.request("click_element", { selector, tabId }, timeoutMs);
+      return toolText(result);
+    }
+    return toolError("click_element requires selector or numeric x and y");
+  } catch (e) {
+    if (e instanceof RateLimitError) {
+      return toolText({ error: "rate_limit_exceeded", retryAfter: e.retryAfter });
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return toolError(msg);
+  }
+}
+
 const tabIdSchema = z.number().int().positive();
 
 const BROWSER_GUIDE_MARKDOWN = `## Poke Browser MCP — agent guide
@@ -123,7 +167,7 @@ const BROWSER_GUIDE_MARKDOWN = `## Poke Browser MCP — agent guide
 
 - **browser_guide** — This playbook (static Markdown; no parameters).
 - **navigate_to** — Open a URL in a tab; waits for load (short or long timeout).
-- **click_element** — Click via CSS/XPath selector (content script) or viewport **x**/**y** (CDP).
+- **click_element** — Click via CSS/XPath or viewport **x**/**y** (CDP); **1s CDP hover** (mouseMoved) at the target before the click.
 - **type_text** — Type into an input/textarea/contenteditable (or focused element); optional **clear** (default true) replaces existing value first.
 - **scroll_window** — Scroll the page (selector into view, absolute position, deltas, or direction).
 - **capture_screenshot** — Visible viewport screenshot (PNG/JPEG).
@@ -227,7 +271,7 @@ export function registerTools(mcp: McpServer): void {
     "click_element",
     {
       description:
-        "Click via CSS selector / XPath (content script) or viewport coordinates (Chrome DevTools Protocol). Provide either selector or x+y. After clicking, it is highly recommended to inspect the DOM (e.g., using get_dom_snapshot) to detect any new modals or UI changes that may have appeared.",
+        "Click via CSS selector / XPath (content script) or viewport coordinates (Chrome DevTools Protocol). Provide either selector or x+y. Always performs CDP Input.dispatchMouseEvent mouseMoved at the target point, waits 1s, then clicks so hover-dependent UI can render. After clicking, it is highly recommended to inspect the DOM (e.g., using get_dom_snapshot) to detect any new modals or UI changes that may have appeared.",
       inputSchema: {
         selector: z
           .string()
@@ -239,11 +283,7 @@ export function registerTools(mcp: McpServer): void {
         tabId: tabIdSchema.optional(),
       },
     },
-    /**
-     * Click via CSS selector / XPath (content script) or viewport coordinates (Chrome DevTools Protocol). Provide either selector or x+y.
-     * After clicking, it is highly recommended to inspect the DOM (e.g., using get_dom_snapshot) to detect any new modals or UI changes that may have appeared.
-     */
-    async ({ selector, x, y, tabId }) => callTool("click_element", { selector, x, y, tabId })
+    async (args) => handleClickElementTool(args)
   );
 
   mcp.registerTool(

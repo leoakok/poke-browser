@@ -189,12 +189,22 @@ function elementSummary(el) {
 }
 
 /**
+ * Viewport client coordinates used as the synthetic click anchor (same as syntheticClick).
+ * @param {Element} el
+ */
+function getSyntheticClickClientPoint(el) {
+  const r = el.getBoundingClientRect();
+  return {
+    x: r.left + Math.min(r.width / 2, 50),
+    y: r.top + Math.min(r.height / 2, 50),
+  };
+}
+
+/**
  * @param {Element} el
  */
 function syntheticClick(el) {
-  const r = el.getBoundingClientRect();
-  const x = r.left + Math.min(r.width / 2, 50);
-  const y = r.top + Math.min(r.height / 2, 50);
+  const { x, y } = getSyntheticClickClientPoint(el);
   const init = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
   el.dispatchEvent(new MouseEvent("mousedown", init));
   el.dispatchEvent(new MouseEvent("mouseup", init));
@@ -224,6 +234,26 @@ function handleClickElement(message, sendResponse) {
   } catch (err) {
     sendResponse({ success: false, error: String(err) });
   }
+}
+
+/**
+ * @param {unknown} message
+ * @param {(r: unknown) => void} sendResponse
+ */
+function handleResolveClickPoint(message, sendResponse) {
+  const m = /** @type {{ selector?: string }} */ (message);
+  const selector = typeof m.selector === "string" ? m.selector : "";
+  if (!selector) {
+    sendResponse({ success: false, error: "Missing selector" });
+    return;
+  }
+  const el = querySelectorOrXPath(selector);
+  if (!el) {
+    sendResponse({ success: false, error: "Element not found" });
+    return;
+  }
+  const { x, y } = getSyntheticClickClientPoint(el);
+  sendResponse({ success: true, x, y });
 }
 
 /**
@@ -1350,6 +1380,7 @@ function handleReadPage(message, sendResponse) {
 /** @type {Record<string, (message: unknown, sendResponse: (r: unknown) => void) => void>} */
 const MESSAGE_HANDLERS = {
   POKE_CLICK_ELEMENT: handleClickElement,
+  POKE_RESOLVE_CLICK_POINT: handleResolveClickPoint,
   POKE_TYPE_TEXT: handleTypeText,
   POKE_SCROLL_WINDOW: handleScrollWindow,
   POKE_EVAL: handleEval,

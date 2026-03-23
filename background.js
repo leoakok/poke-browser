@@ -3,6 +3,8 @@
 const DEFAULT_WS_PORT = 9009;
 const LOG_MAX = 50;
 const NAVIGATE_WAIT_MS = 30_000;
+/** CDP mouseMoved → wait → click so hover menus/tooltips can settle. */
+const CLICK_ELEMENT_HOVER_DELAY_MS = 1000;
 const MAX_NET_PER_TAB = 200;
 
 /** @type {Set<number>} */
@@ -721,6 +723,34 @@ async function handleClickElement(payload) {
   const hasXY = Number.isFinite(x) && Number.isFinite(y);
 
   if (selector) {
+    const pt = await chrome.tabs
+      .sendMessage(tabId, { type: "POKE_RESOLVE_CLICK_POINT", selector })
+      .catch((e) => {
+        throw new Error(`click_element resolve failed: ${String(e)}`);
+      });
+    if (
+      !pt ||
+      pt.success !== true ||
+      typeof pt.x !== "number" ||
+      typeof pt.y !== "number" ||
+      !Number.isFinite(pt.x) ||
+      !Number.isFinite(pt.y)
+    ) {
+      const err = pt && typeof pt.error === "string" ? pt.error : "could not resolve target coordinates";
+      throw new Error(`click_element ${err}`);
+    }
+    await showCursorFeedbackDot(tabId, pt.x, pt.y);
+    await debuggerAttachForTool(tabId);
+    try {
+      await debuggerSend(tabId, "Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x: pt.x,
+        y: pt.y,
+      });
+      await new Promise((r) => setTimeout(r, CLICK_ELEMENT_HOVER_DELAY_MS));
+    } finally {
+      await debuggerDetachForTool(tabId);
+    }
     const res = await chrome.tabs.sendMessage(tabId, { type: "POKE_CLICK_ELEMENT", selector }).catch((e) => {
       throw new Error(`click_element relay failed: ${String(e)}`);
     });
