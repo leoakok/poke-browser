@@ -342,6 +342,48 @@ if (!existsSync(entry)) {
     showMcpLine,
   });
 
+  // Check for newer version (non-blocking)
+  (async () => {
+    try {
+      const https = await import("node:https");
+      const latest = await new Promise((resolve, reject) => {
+        const req = https.get(
+          "https://registry.npmjs.org/@leokok%2fpoke-browser/latest",
+          { timeout: 3000 },
+          (res) => {
+            let data = "";
+            res.on("data", (d) => (data += d));
+            res.on("end", () => {
+              try {
+                resolve(JSON.parse(data).version);
+              } catch {
+                reject();
+              }
+            });
+          },
+        );
+        req.on("error", reject);
+        req.on("timeout", () => {
+          req.destroy();
+          reject();
+        });
+      });
+      const current = pkg.version;
+      if (latest && latest !== current) {
+        console.log(
+          "\x1b[33m  ⚡ Update available: v" +
+            latest +
+            " (you have v" +
+            current +
+            ")\x1b[0m",
+        );
+        console.log(
+          "\x1b[90m     npx @leokok/poke-browser@latest\x1b[0m\n",
+        );
+      }
+    } catch {}
+  })();
+
   const resolvedChildArgs = cloneArgsWithResolvedMcpPort(childArgs, mcpPort);
 
   if (wantPokeTunnelFlow) {

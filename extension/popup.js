@@ -16,6 +16,28 @@ const { version } = chrome.runtime.getManifest();
 const DEFAULT_PORT = 9009;
 const LOG_LIST_MAX = 50;
 
+function checkForUpdates() {
+  const currentVersion = chrome.runtime.getManifest().version;
+  fetch("https://registry.npmjs.org/@leokok%2fpoke-browser/latest", {
+    signal: AbortSignal.timeout(5000),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      const latestVersion = data.version;
+      if (latestVersion && latestVersion !== currentVersion) {
+        const updateEl = document.getElementById("update-notice");
+        if (updateEl) {
+          updateEl.textContent =
+            "⚡ v" +
+            latestVersion +
+            " available — npx @leokok/poke-browser@latest";
+          updateEl.style.display = "block";
+        }
+      }
+    })
+    .catch(() => {});
+}
+
 function normalizePort(value) {
   const n = Number(value);
   if (Number.isFinite(n) && n > 0 && n < 65536) return Math.trunc(n);
@@ -179,4 +201,5 @@ mcpEnabled?.addEventListener("change", async () => {
   await syncFromBackgroundStatus();
 });
 
+checkForUpdates();
 void load();
