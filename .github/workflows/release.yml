@@ -1,0 +1,46 @@
+# Publishes the npm package in mcp-server/ when a version tag is pushed.
+#
+# Trigger: push tag v* (e.g. v0.1.0)
+# Steps: npm ci → npm run build → npm publish
+#
+# Required repo secret: NPM_TOKEN — https://www.npmjs.com/settings/~/tokens
+# (Granular access: publish for @leokok/poke-browser)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        working-directory: mcp-server
+        run: npm ci
+
+      - name: Build
+        working-directory: mcp-server
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: mcp-server
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish

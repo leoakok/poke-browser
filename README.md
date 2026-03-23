@@ -1,158 +1,50 @@
-# poke-browser
+# poke-browser — Chrome Browser MCP
 
-Chrome extension plus MCP (Model Context Protocol) server so an AI agent can drive the browser you already have open: list tabs, navigate, click, run page JavaScript, capture screenshots, and open or close tabs.
+**A Chrome extension + MCP server for natural-language browser automation**
 
-## Architecture
+Built by [Poke](https://interaction.co) — the AI assistant from interaction.co — together with [Leo Kök](https://github.com/leoakok).
 
-```text
-                    ┌─────────────────────────────┐
-                    │  MCP client (Cursor, Claude) │
-                    │         stdio or HTTP         │
-                    └──────────────┬──────────────┘
-                                   │ JSON-RPC (MCP)
-                                   ▼
-                    ┌─────────────────────────────┐
-                    │   Node: poke-browser-mcp    │
-                    │   tools → bridge.request()    │
-                    └──────────────┬──────────────┘
-                                   │ WebSocket server
-                                   │ 127.0.0.1:POKE_BROWSER_WS_PORT
-                                   ▼
-┌──────────────────────────────────────────────────┐
-│ Chrome: poke-browser extension (service worker)   │
-│  hello+token → welcome/auth_ok → command/response │
-└──────────────────────┬───────────────────────────┘
-                       │ tabs, debugger, cookies, …
-                       ▼
-              Content script / page
-```
+[poke-browser on GitHub](https://github.com/leoakok/poke-browser)
 
-1. **Extension** (`background.js`) opens a WebSocket **client** to the MCP process. The server sends `welcome`, then the extension sends `hello`. If `POKE_BROWSER_TOKEN` is set on the server, `hello` must include the same token (extension popup **Auth token**); if the env var is unset, auth is off (dev / zero-config). After `auth_ok`, the server forwards tool calls as JSON **command** messages; the extension replies with **response**.
-2. **MCP server** (`mcp-server/`) speaks MCP over **stdio** (or HTTP with `--http`), rate-limits outbound commands (30 per 10s), and only accepts WebSocket connections whose `Origin` is missing (CLI clients) or starts with `chrome-extension://`.
-3. **Content script** (`content.js`) relays DOM automation, console/error capture, and `evaluate_js` into the page.
+## Key features (MCP tools)
 
-Ports and env vars:
+- **`navigate_to`** — Open URLs and wait for load completion on the chosen tab.
+- **`find_element`** — Locate elements by CSS, text, ARIA, or XPath; queries respect **open shadow roots** (and the same-document tree you’d expect for complex widgets and “portal-style” UI mounted in the page).
+- **`click_element`** — Click by selector or viewport coordinates; **always hovers ~1s** before the click so hover menus and delayed affordances can appear.
+- **`type_text`** — Type into inputs and contenteditable regions; optional **`clear`** (default true) wipes existing text before typing, or set `clear: false` to append.
+- **`get_dom_snapshot`** — Compact DOM tree with tags, roles, labels, bounds, and interactivity hints.
+- **`capture_and_upload_screenshot`** — Capture the visible tab and POST it to your upload endpoint (or fall back to inline base64 when upload isn’t configured).
+- **`get_accessibility_tree`** — Semantic nodes in reading order for screen-reader–style reasoning.
+- **`scroll_window`** — Scroll by position, delta, direction, or “scroll into view” for a selector.
+- **`managetabs`** — List, open, close, and switch tabs in the connected Chrome profile.
+- **`browser_guide`** — In-repo Markdown playbook: every tool, common flows, and troubleshooting.
 
-- **WebSocket:** `POKE_BROWSER_WS_PORT` (default **9009**) — match the extension popup **WS port** (`wsPort` in storage).
-- **Optional shared secret:** `POKE_BROWSER_TOKEN` — when set, match the extension popup **Auth token** (`wsAuthToken`). When unset, the WebSocket accepts `hello` without a token check. See [Security](#security).
-- **HTTP MCP** (`--http` / `--tunnel`): **8755** or `POKE_BROWSER_MCP_PORT` (aliases: `POKE_BROWSER_PORT`, `POKE_TUNNEL_LOCAL_PORT`).
+## Snapshot-then-act
 
-See **[TESTING.md](./TESTING.md)** for inspector payloads, manual WebSocket examples, and troubleshooting.
+After every **`click_element`** call, **inspect the page again** with **`get_dom_snapshot`** (or related tools) before the next action. Clicks often open modals, slide-overs, or rerendered regions; a fresh snapshot keeps the model aligned with what the user actually sees.
 
-## Quick start (3 steps)
+## Installation
 
-1. **Load the extension** in Chrome (`chrome://extensions` → Load unpacked → this repo folder). Open the popup and set **WS port** if you are not using the default `9009`.
-2. **Run the MCP server** (from `mcp-server/` after `npm install && npm run build`): `npm start` or `node dist/index.js`. For a fixed secret, set `POKE_BROWSER_TOKEN` and paste the same value into the popup **Auth token**; leave both unset for local dev (no token required).
-3. **Point your MCP client** at the server (e.g. Cursor `mcpServers` with `command` + `args` to run this package, and `env` for `POKE_BROWSER_WS_PORT` / `POKE_BROWSER_TOKEN` as needed). Confirm the popup shows **Connected**.
+1. **MCP server (npm)**  
+   Install the published package (scope **`@leokok/poke-browser`**):
 
-## Load the extension in Chrome
+   ```bash
+   npm install @leokok/poke-browser
+   ```
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked** and choose the `poke-browser` directory (the folder that contains `manifest.json`).
-4. Pin the extension if you want quick access to the popup. Open the popup and confirm the status shows **Connected** once the MCP server is running (see below).
+   Run it via your MCP client (e.g. `npx -y @leokok/poke-browser`) or from a local checkout under `mcp-server/` with `npm install`, `npm run build`, and `npm start`. See [TESTING.md](./TESTING.md) for ports, env vars, and the inspector.
 
-Grant any permission prompts so tabs and scripting work on the sites you automate.
+2. **Chrome extension**  
+   Open `chrome://extensions`, enable **Developer mode**, **Load unpacked**, and select **this repository’s root folder** — the directory that contains `manifest.json` (the extension assets live alongside the manifest, not in a separate `extension/` directory).
 
-## Run the MCP server
+3. **Connect**  
+   Start the MCP server, load the extension, and align **WebSocket port** (and optional **auth token**) between the popup and `POKE_BROWSER_WS_PORT` / `POKE_BROWSER_TOKEN`.
 
-### Quick start via npx
+## License
 
-After this package is published (or when testing a linked install):
+MIT — see [`mcp-server/package.json`](./mcp-server/package.json).
 
-```bash
-npx @leokok/poke-browser
-```
+## Documentation
 
-That runs the published `poke-browser` binary (stdio MCP by default). Match `POKE_BROWSER_WS_PORT` with the extension popup if you change the WebSocket port.
-
-### From this repository
-
-From the `mcp-server` directory:
-
-```bash
-cd mcp-server
-npm install
-npm run build
-npm start
-```
-
-(`npm start` runs `node ./cli.mjs`, same entrypoint as npx.)
-
-Optional: use a custom WebSocket port:
-
-```bash
-POKE_BROWSER_WS_PORT=9010 npm start
-```
-
-Match the same port in the extension popup if you change it.
-
-**Poke tunnel (HTTP MCP + `poke tunnel`)** — same pattern as other Poke bridges: Streamable HTTP on localhost, then the Poke CLI tunnels it.
-
-```bash
-cd mcp-server
-npm run build
-node ./cli.mjs --http
-# or: node ./cli.mjs --tunnel
-```
-
-Use `POKE_BROWSER_MCP_PORT` (default `8755`) if you need a specific HTTP listen port. `--tunnel` runs `npx --yes poke@latest tunnel http://127.0.0.1:<port>/mcp -n "poke-browser"` after the server is up.
-
-For a direct run without the launcher script:
-
-```bash
-npm run serve
-```
-
-(`serve` runs `node dist/index.js`; build output uses the same env vars and flags.)
-
-## Connect Cursor / Claude / any MCP client
-
-MCP clients typically spawn your server as a subprocess and talk over **stdin/stdout**.
-
-**Cursor** — in MCP settings:
-
-```json
-{
-  "mcpServers": {
-    "poke-browser": {
-      "command": "npx",
-      "args": ["-y", "@leokok/poke-browser"],
-      "env": {
-        "POKE_BROWSER_WS_PORT": "9009",
-        "POKE_BROWSER_TOKEN": "use-a-long-random-secret"
-      }
-    }
-  }
-}
-```
-
-Use the same `POKE_BROWSER_TOKEN` value in the extension popup **Auth token** so the handshake succeeds after each server restart.
-
-For a local checkout instead of npx, use `"command": "node"` and `"args": ["/absolute/path/to/poke-labs/poke-browser/mcp-server/cli.mjs"]` (run `npm run build` first).
-
-**Claude Desktop** — same idea under `claude_desktop_config.json` `mcpServers`, using `command` / `args` / `env`.
-
-Requirements:
-
-1. Chrome has **poke-browser** loaded and the popup shows **Connected**.
-2. The MCP server process is running **or** your client starts it automatically via the config above.
-3. `POKE_BROWSER_WS_PORT` (server) and the extension popup port stay in sync.
-4. `POKE_BROWSER_TOKEN` matches the extension **Auth token** when you use a fixed token (recommended for MCP-launched servers).
-
-## Security
-
-- **WebSocket token:** When `POKE_BROWSER_TOKEN` is set, only clients whose `hello` includes that exact token stay connected; mismatches get `auth_error` and the socket closes. When the env var is unset, `hello` is accepted without a token check (localhost dev only).
-- **Origin:** The WebSocket server allows connections with no `Origin` header (Node tooling) or `Origin: chrome-extension://…` (the extension). Other origins get HTTP 4403.
-- **Rate limit:** Up to **30** extension commands per **10 seconds**; further calls return `{ "error": "rate_limit_exceeded", "retryAfter": 10 }` without dropping the socket.
-- **Trust model:** This stack can drive the browser like a user: arbitrary URLs, injected scripts, screenshots, cookies. Use a dedicated Chrome profile, keep the WebSocket on localhost, and only connect MCP clients you trust. Copy `.env.example` to guide local env vars; do not commit real secrets.
-
-## Repository layout
-
-| Path | Role |
-|------|------|
-| `manifest.json` | MV3 manifest |
-| `background.js` | Service worker: WebSocket client + command dispatch |
-| `content.js` | Click / `evaluate_js` relay |
-| `popup.html` / `popup.js` | Connection status and activity log |
-| `mcp-server/` | MCP + WebSocket bridge (see `mcp-server/README.md`) |
+- **[TESTING.md](./TESTING.md)** — inspector payloads, WebSocket examples, troubleshooting.  
+- **[mcp-server/README.md](./mcp-server/README.md)** — MCP server specifics and dev commands.
