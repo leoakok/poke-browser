@@ -23,6 +23,26 @@ async function findAvailablePort(startPort) {
   });
 }
 
+// Handle setup command
+if (process.argv.includes("setup") || process.argv.includes("--install")) {
+  const { cp, mkdir } = await import("node:fs/promises");
+  const { resolve } = await import("node:path");
+  const __dir = dirname(fileURLToPath(import.meta.url));
+  const srcExt = resolve(__dir, "..", "extension");
+  const destExt = resolve(process.cwd(), "poke-browser-extension");
+  try {
+    await mkdir(destExt, { recursive: true });
+    await cp(srcExt, destExt, { recursive: true, force: true });
+    console.log("\n  poke-browser setup complete!\n");
+    console.log("  Extension copied to: " + destExt + "\n");
+    console.log("  Next: open chrome://extensions, enable Developer Mode,");
+    console.log('  click "Load unpacked" and select: ' + destExt + "\n");
+  } catch (e) {
+    console.error("  Setup failed:", e.message);
+  }
+  process.exit(0);
+}
+
 const require = createRequire(import.meta.url);
 const pkg = require("./package.json");
 const VERSION = pkg.version;

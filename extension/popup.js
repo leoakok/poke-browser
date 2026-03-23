@@ -9,6 +9,7 @@ const mcpEnabled = document.getElementById("mcpEnabled");
 const versionEl = document.getElementById("version");
 const logsSection = document.getElementById("logsSection");
 const logsToggle = document.getElementById("logsToggle");
+const disconnectedHint = document.getElementById("disconnected-hint");
 
 const { version } = chrome.runtime.getManifest();
 
@@ -77,12 +78,15 @@ function applyStatus(status) {
   if (status === "connected") {
     statusDot.classList.add("connected");
     statusText.textContent = "Connected";
+    disconnectedHint?.classList.add("hidden");
   } else if (status === "connecting") {
     statusDot.classList.add("connecting");
     statusText.textContent = "Connecting…";
+    disconnectedHint?.classList.add("hidden");
   } else {
     statusDot.classList.add("disconnected");
     statusText.textContent = "Disconnected";
+    disconnectedHint?.classList.remove("hidden");
   }
 }
 
