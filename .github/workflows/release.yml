@@ -1,6 +1,6 @@
-# Publishes the npm package in mcp-server/ when a version tag is pushed.
+# Publishes the npm package in mcp-server/ on every push to main.
 #
-# Trigger: push tag v* (e.g. v0.1.0)
+# Trigger: push to main branch
 # Steps: npm ci → npm run build → npm publish
 #
 # Required repo secret: NPM_TOKEN — https://www.npmjs.com/settings/~/tokens
@@ -10,8 +10,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 permissions:
   contents: read
