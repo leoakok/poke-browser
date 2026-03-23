@@ -56,3 +56,22 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
+
+      - name: Create Git tag
+        run: |
+          git tag v${{ env.NEW_VERSION }}
+          git push origin v${{ env.NEW_VERSION }}
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${{ env.NEW_VERSION }}`,
+              name: `v${{ env.NEW_VERSION }}`,
+              body: `## @leokok/poke-browser v${{ env.NEW_VERSION }}\n\n### Install\n\`\`\`\nnpx @leokok/poke-browser\n\`\`\`\n\n### Changes\nAuto-released via CI. See commit history for details.\n\n### Links\n- [npm](https://www.npmjs.com/package/@leokok/poke-browser)\n- [GitHub](https://github.com/leoakok/poke-browser)`,
+              draft: false,
+              prerelease: false
+            });
