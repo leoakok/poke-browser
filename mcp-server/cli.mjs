@@ -22,6 +22,28 @@ const rawArgs = process.argv.slice(2);
 const verboseCli =
   rawArgs.includes("--debug") || rawArgs.includes("--verbose");
 
+/** Same shape as @leokok/poke-agents `argAfter` (used there for `--mcp-name`). */
+function argAfter(flag) {
+  const i = process.argv.indexOf(flag);
+  if (i === -1) return null;
+  const v = process.argv[i + 1];
+  if (v == null || String(v).startsWith("-")) return null;
+  return String(v);
+}
+
+function slugifyMcpServerName(s) {
+  const t = String(s)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (t.length === 0) return "poke-browser-mcp";
+  return t.length > 64 ? t.slice(0, 64) : t;
+}
+
+/** Custom Poke tunnel `-n` label + MCP `initialize` server name (when `--name` is passed). */
+const customMcpName = argAfter("--name");
+
 const color =
   output.isTTY && !process.env.NO_COLOR
     ? {
@@ -98,7 +120,11 @@ function extensionFolderPath() {
 function printQuietStartupBanner() {
   const extPath = extensionFolderPath();
   console.error("");
-  console.error(`  poke-browser v${VERSION}`);
+  console.error(
+    customMcpName
+      ? `  poke-browser v${VERSION} (as '${customMcpName}')`
+      : `  poke-browser v${VERSION}`,
+  );
   console.error("");
   console.error("  Load the Chrome extension:");
   console.error("");
@@ -125,6 +151,10 @@ function printQuietStartupBanner() {
 function childEnv() {
   const env = { ...process.env };
   if (verboseCli) env.POKE_BROWSER_VERBOSE = "1";
+  if (customMcpName) {
+    env.POKE_BROWSER_TUNNEL_NAME = customMcpName;
+    env.POKE_BROWSER_MCP_SERVER_NAME = slugifyMcpServerName(customMcpName);
+  }
   return env;
 }
 
@@ -136,6 +166,7 @@ Usage:
   poke-browser --poke-tunnel      HTTP MCP + Poke tunnel (same auth/tunnel pattern as poke-apple-music)
   poke-browser --http [port]      Streamable HTTP MCP on 127.0.0.1 (default: env POKE_BROWSER_MCP_PORT or 8755)
   poke-browser --tunnel [port]    Same as --http, then: npx poke@latest tunnel …/mcp
+  poke-browser --name <label>     Poke tunnel -n label and MCP server id (default: poke-browser)
   poke-browser --debug            Verbose stderr ([poke-browser], WebSocket port, MCP debug)
   poke-browser --verbose          Same as --debug
 
@@ -149,7 +180,8 @@ Environment:
   POKE_BROWSER_WS_PORT          WebSocket port for the extension (default 9009)
   POKE_BROWSER_MCP_PORT       HTTP MCP listen port for --http / tunnel (default 8755)
   POKE_BROWSER_PORT             Alias for HTTP MCP port (same as run.ts)
-  POKE_BROWSER_TUNNEL_NAME      poke tunnel -n label (default: poke-browser)
+  POKE_BROWSER_TUNNEL_NAME      poke tunnel -n label (default: poke-browser; --name overrides)
+  POKE_BROWSER_MCP_SERVER_NAME  MCP initialize server name slug (set from --name when passed)
 
 Build once (or pass --build):
   npm run build
@@ -166,13 +198,19 @@ const wantBuild = rawArgs.includes("--build");
 const wantPokeTunnelFlow =
   process.env.npm_lifecycle_event === "start:tunnel" ||
   rawArgs.includes("--poke-tunnel");
-const childArgs = rawArgs.filter(
-  (a) =>
-    a !== "--build" &&
-    a !== "--poke-tunnel" &&
-    a !== "--debug" &&
-    a !== "--verbose",
-);
+const childArgs = rawArgs.filter((a, i, arr) => {
+  if (
+    a === "--build" ||
+    a === "--poke-tunnel" ||
+    a === "--debug" ||
+    a === "--verbose" ||
+    a === "--name"
+  ) {
+    return false;
+  }
+  if (i > 0 && arr[i - 1] === "--name") return false;
+  return true;
+});
 
 function runBuild() {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";

@@ -3,9 +3,12 @@ import { registerTools } from "./tools.js";
 
 const SERVER_VERSION = "0.1.0";
 
+const MCP_SERVER_NAME =
+  process.env.POKE_BROWSER_MCP_SERVER_NAME?.trim() || "poke-browser-mcp";
+
 export function createPokeBrowserMcpServer(): McpServer {
   const mcp = new McpServer({
-    name: "poke-browser-mcp",
+    name: MCP_SERVER_NAME,
     version: SERVER_VERSION,
   });
   registerTools(mcp);

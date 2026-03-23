@@ -237,6 +237,20 @@ async function runHttp(opts) {
         log("");
         let tunnelErrBuf = "";
         let tunnelUrlReported = false;
+        let localWsLinePrinted = false;
+        const printLocalWsLine = () => {
+            if (localWsLinePrinted)
+                return;
+            localWsLinePrinted = true;
+            logNotice(`  Local WS:  ws://127.0.0.1:${WS_PORT}`);
+        };
+        const reportLocalTunnelLineFromBuffer = () => {
+            if (localWsLinePrinted)
+                return;
+            if (!/\bLocal:\s*http:\/\/[^\s"'<>]+/i.test(tunnelErrBuf))
+                return;
+            printLocalWsLine();
+        };
         const reportTunnelUrlFromBuffer = () => {
             if (tunnelUrlReported)
                 return;
@@ -260,6 +274,7 @@ async function runHttp(opts) {
             if (tunnelErrBuf.length > 24_000) {
                 tunnelErrBuf = tunnelErrBuf.slice(-24_000);
             }
+            reportLocalTunnelLineFromBuffer();
             reportTunnelUrlFromBuffer();
         });
         tunnel.on("error", (err) => {
@@ -277,6 +292,8 @@ async function runHttp(opts) {
             if (!tunnelUrlReported) {
                 log("[poke-browser] Tunnel: (public URL is printed by the Poke CLI above — ends with /mcp)");
             }
+            if (!localWsLinePrinted)
+                printLocalWsLine();
             log("[poke-browser] Ready. Load the Chrome extension and connect your MCP client.");
         }, 2500);
     }
