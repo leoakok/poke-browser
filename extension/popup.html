@@ -183,6 +183,76 @@
         outline-offset: 2px;
       }
 
+      .logs-section {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 14px;
+        overflow: hidden;
+        background: var(--surface);
+      }
+
+      .logs-header {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 14px;
+        margin: 0;
+        background: transparent;
+        border: none;
+        color: var(--text-primary);
+        font-size: 13px;
+        font-weight: 500;
+        font-family: inherit;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .logs-header:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .logs-chevron {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        transition: transform 0.2s ease;
+        flex-shrink: 0;
+      }
+
+      .logs-section.expanded .logs-chevron {
+        transform: rotate(180deg);
+      }
+
+      .logs-collapse {
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height 0.25s ease;
+      }
+
+      .logs-section.expanded .logs-collapse {
+        max-height: 200px;
+        overflow-y: auto;
+      }
+
+      #log-list {
+        padding: 0 14px 10px;
+      }
+
+      #log-list .log-line {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 11px;
+        color: #666;
+        border-bottom: 1px solid #1a1a1a;
+        padding: 6px 0;
+        word-break: break-word;
+      }
+
+      #log-list .log-line:last-child {
+        border-bottom: none;
+      }
+
       .footer {
         text-align: center;
         padding-top: 4px;
@@ -235,6 +305,20 @@
         <input type="checkbox" id="mcpEnabled" checked />
         <span class="slider"></span>
       </label>
+    </div>
+
+    <div class="logs-section" id="logsSection">
+      <button type="button" class="logs-header" id="logsToggle" aria-expanded="false" aria-controls="logsCollapse">
+        <span>Logs</span>
+        <span class="logs-chevron" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </span>
+      </button>
+      <div class="logs-collapse" id="logsCollapse">
+        <div id="log-list"></div>
+      </div>
     </div>
 
     <footer class="footer">

@@ -1,11 +1,3 @@
-# Publishes the npm package in mcp-server/ on every push to main.
-#
-# Trigger: push to main branch
-# Steps: npm ci → npm run build → npm publish
-#
-# Required repo secret: NPM_TOKEN — https://www.npmjs.com/settings/~/tokens
-# (Granular access: publish for @leokok/poke-browser)
-
 name: Release
 
 on:
@@ -14,22 +6,28 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # Skip commits made by this workflow itself
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: mcp-server/package-lock.json
           registry-url: https://registry.npmjs.org
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Install dependencies
         working-directory: mcp-server
@@ -39,8 +37,22 @@ jobs:
         working-directory: mcp-server
         run: npm run build
 
+      - name: Bump patch version
+        working-directory: mcp-server
+        run: |
+          npm version patch --no-git-tag-version
+          NEW_VERSION=$(node -p "require('./package.json').version")
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+          node -e "const fs=require('fs');const v='${NEW_VERSION}';const m=JSON.parse(fs.readFileSync('../extension/manifest.json'));m.version=v.replace(/^v/,'');fs.writeFileSync('../extension/manifest.json',JSON.stringify(m,null,2)+'\n');"
+
+      - name: Commit and push version bump
+        run: |
+          git add mcp-server/package.json extension/manifest.json
+          git commit -m "chore: bump version to v${{ env.NEW_VERSION }} [skip ci]"
+          git push origin main
+
       - name: Publish to npm
         working-directory: mcp-server
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish
+        run: npm publish --access public

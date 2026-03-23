@@ -12,6 +12,7 @@ import { join } from "node:path";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { log } from "./logger.js";
 import {
   bridge,
   EVALUATE_JS_TIMEOUT_MS,
@@ -32,7 +33,7 @@ function logToolCall(name: string, args: unknown): void {
   } catch {
     payload = String(args);
   }
-  console.error("[poke-browser]", name, payload);
+  log("[poke-browser]", name, payload);
 }
 
 export function toolText(data: unknown): CallToolResult {

@@ -4,23 +4,23 @@
  * Auth: `npx poke@latest whoami` / `poke login` — not POKE_API_KEY.
  * Tunnel: `npx poke@latest tunnel <local /mcp URL> -n "<label>"` (stdio inherit).
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stderr as output } from "node:process";
 
+const require = createRequire(import.meta.url);
+const pkg = require("./package.json");
+const VERSION = pkg.version;
+
 const root = dirname(fileURLToPath(import.meta.url));
 const entry = join(root, "dist", "index.js");
 
-const README_URL = "https://github.com/leoakok/poke-browser";
-const README_README_URL = `${README_URL}#readme`;
-const WELCOME_MARKER = join(homedir(), ".poke-browser-welcomed");
-const DEFAULT_WS_PORT = 9009;
-
 const rawArgs = process.argv.slice(2);
+const verboseCli =
+  rawArgs.includes("--debug") || rawArgs.includes("--verbose");
 
 const color =
   output.isTTY && !process.env.NO_COLOR
@@ -36,10 +36,6 @@ const color =
         green: (s) => s,
         red: (s) => s,
       };
-
-function pkgJson() {
-  return JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-}
 
 /** Same check as poke-apple-music `checkPokeLogin`. */
 function checkPokeLogin() {
@@ -93,98 +89,34 @@ function ensurePokeLoginForTunnel() {
   return true;
 }
 
-/** Mirrors `readPort()` in `src/transport.ts` (WebSocket port before child spawns). */
-function readWebSocketPort() {
-  const raw = process.env.POKE_BROWSER_WS_PORT ?? process.env.WS_PORT;
-  if (raw === undefined || raw === "") return DEFAULT_WS_PORT;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0 || n > 65535) {
-    console.error(
-      `Invalid POKE_BROWSER_WS_PORT="${raw}", falling back to ${DEFAULT_WS_PORT}`,
-    );
-    return DEFAULT_WS_PORT;
-  }
-  return Math.trunc(n);
-}
-
 function extensionFolderPath() {
   return join(root, "..", "extension");
 }
 
-function openReadmeInBrowser(url) {
-  try {
-    const require = createRequire(import.meta.url);
-    require.resolve("open");
-    const open = require("open");
-    const p = open(url);
-    if (p && typeof p.catch === "function") void p.catch(() => {});
-  } catch {
-    try {
-      if (process.platform === "darwin") {
-        spawnSync("open", [url], { stdio: "ignore" });
-      } else if (process.platform === "win32") {
-        spawnSync("cmd", ["/c", "start", "", url], {
-          stdio: "ignore",
-          shell: false,
-        });
-      } else {
-        spawnSync("xdg-open", [url], { stdio: "ignore" });
-      }
-    } catch {
-      /* ignore */
-    }
-  }
+function printQuietStartupBanner() {
+  const extPath = extensionFolderPath();
+  console.error("");
+  console.error(`  poke-browser v${VERSION}`);
+  console.error("");
+  console.error("  Load the Chrome extension:");
+  console.error("");
+  console.error("  1. Open chrome://extensions");
+  console.error("");
+  console.error("  2. Enable Developer Mode");
+  console.error("");
+  console.error('  3. Click "Load unpacked" and select the extension folder:');
+  console.error(`     ${extPath}`);
+  console.error("");
+  console.error("  4. Extension auto-connects to this server");
+  console.error("");
+  console.error("  ─────────────────────────────────────");
+  console.error("");
 }
 
-/**
- * First run: full Chrome extension steps + optional README in browser (marker).
- * Later runs: one line with WebSocket port and docs link.
- */
-function printMcpStartupOnboarding() {
-  const { name, version } = pkgJson();
-  const wsPort = readWebSocketPort();
-  const extPath = extensionFolderPath();
-
-  if (!existsSync(WELCOME_MARKER)) {
-    console.error(color.dim("  ═══════════════════════════════════════════"));
-    console.error(`  ${color.bold(name)}  ${color.dim(`v${version}`)}`);
-    console.error(color.dim("  ═══════════════════════════════════════════"));
-    console.error("");
-    console.error(color.bold("  Set up the Chrome extension:"));
-    console.error("");
-    console.error(
-      `  ${color.bold("Step 1:")} Open Chrome and go to ${color.dim("chrome://extensions")}`,
-    );
-    console.error(
-      `  ${color.bold("Step 2:")} Enable Developer Mode (toggle in top right)`,
-    );
-    console.error(
-      `  ${color.bold("Step 3:")} Click ${color.dim("Load unpacked")} and select this folder:`,
-    );
-    console.error(`         ${color.green(extPath)}`);
-    console.error(
-      `  ${color.bold("Step 4:")} The Poke Browser extension is now active. It will auto-connect to this MCP server.`,
-    );
-    console.error("");
-    console.error(
-      `  ${color.bold("WebSocket port:")} ${color.green(String(wsPort))} (override with ${color.dim("POKE_BROWSER_WS_PORT")})`,
-    );
-    console.error(
-      `  ${color.bold("Docs:")} ${color.dim(README_README_URL)}`,
-    );
-    console.error("");
-    openReadmeInBrowser(README_README_URL);
-    try {
-      writeFileSync(WELCOME_MARKER, "", "utf8");
-    } catch {
-      /* ignore */
-    }
-    return;
-  }
-
-  console.error(
-    `${color.bold(`[${name}]`)} v${version} — WebSocket port ${color.green(String(wsPort))} · ${color.dim(README_README_URL)}`,
-  );
+function childEnv() {
+  const env = { ...process.env };
+  if (verboseCli) env.POKE_BROWSER_VERBOSE = "1";
+  return env;
 }
 
 if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
@@ -195,6 +127,8 @@ Usage:
   poke-browser --poke-tunnel      HTTP MCP + Poke tunnel (same auth/tunnel pattern as poke-apple-music)
   poke-browser --http [port]      Streamable HTTP MCP on 127.0.0.1 (default: env POKE_BROWSER_MCP_PORT or 8755)
   poke-browser --tunnel [port]    Same as --http, then: npx poke@latest tunnel …/mcp
+  poke-browser --debug            Verbose stderr ([poke-browser], WebSocket port, MCP debug)
+  poke-browser --verbose          Same as --debug
 
 Poke auth (tunnel flows):
   Uses the global Poke CLI — same as @leokok/poke-apple-music:
@@ -215,7 +149,7 @@ Build once (or pass --build):
 }
 
 if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
-  console.error(pkgJson().version ?? "0.0.0");
+  console.error(pkg.version ?? "0.0.0");
   process.exit(0);
 }
 
@@ -224,7 +158,11 @@ const wantPokeTunnelFlow =
   process.env.npm_lifecycle_event === "start:tunnel" ||
   rawArgs.includes("--poke-tunnel");
 const childArgs = rawArgs.filter(
-  (a) => a !== "--build" && a !== "--poke-tunnel",
+  (a) =>
+    a !== "--build" &&
+    a !== "--poke-tunnel" &&
+    a !== "--debug" &&
+    a !== "--verbose",
 );
 
 function runBuild() {
@@ -254,7 +192,7 @@ if (!existsSync(entry)) {
   process.exit(1);
 }
 
-printMcpStartupOnboarding();
+printQuietStartupBanner();
 
 if (wantPokeTunnelFlow) {
   if (!ensurePokeLoginForTunnel()) {
@@ -277,12 +215,13 @@ if (wantPokeTunnelFlow) {
   const r = spawnSync(
     process.execPath,
     [entry, "--http", portArg, "--tunnel", ...childArgs],
-    { stdio: "inherit", env: process.env },
+    { stdio: "inherit", env: childEnv() },
   );
   process.exit(r.status ?? 1);
 }
 
 const r = spawnSync(process.execPath, [entry, ...childArgs], {
   stdio: "inherit",
+  env: childEnv(),
 });
 process.exit(r.status ?? 1);

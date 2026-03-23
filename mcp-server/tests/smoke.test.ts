@@ -16,6 +16,7 @@ beforeAll(async () => {
       ...process.env,
       POKE_BROWSER_WS_PORT: String(PORT),
       POKE_BROWSER_TOKEN: "test-token",
+      POKE_BROWSER_VERBOSE: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

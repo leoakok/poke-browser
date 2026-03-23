@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { log } from "./logger.js";
+import { log, logError, logNotice } from "./logger.js";
 
 const WS_PING_INTERVAL_MS = 20_000;
 const WS_PONG_DEADLINE_MS = 30_000;
@@ -93,7 +93,7 @@ export function readPort(): number {
   if (raw === undefined || raw === "") return DEFAULT_PORT;
   const n = Number(raw);
   if (!Number.isFinite(n) || n <= 0 || n > 65535) {
-    console.error(`Invalid POKE_BROWSER_WS_PORT="${raw}", falling back to ${DEFAULT_PORT}`);
+    log(`Invalid POKE_BROWSER_WS_PORT="${raw}", falling back to ${DEFAULT_PORT}`);
     return DEFAULT_PORT;
   }
   return Math.trunc(n);
@@ -272,20 +272,22 @@ export async function startExtensionWebSocketServer(
 
   wss.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
-      log(`[poke-browser] Port ${port} is already in use.`);
-      log(`[poke-browser] To free it: lsof -ti :${port} | xargs kill -9`);
-      log(
+      logError(`[poke-browser] Port ${port} is already in use.`);
+      logError(`[poke-browser] To free it: lsof -ti :${port} | xargs kill -9`);
+      logError(
         `[poke-browser] Or set POKE_BROWSER_WS_PORT=<other-port> to use a different WebSocket port.`,
       );
       process.exit(1);
     }
-    console.error("[poke-browser-mcp] WebSocket server error:", err);
+    logError("[poke-browser-mcp] WebSocket server error:", err);
   });
 
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     const origin = req.headers.origin;
     if (!isWsOriginAllowed(origin)) {
-      console.error(`[poke-browser-mcp] Rejected WebSocket connection from disallowed Origin: ${origin ?? "(none)"}`);
+      logError(
+        `[poke-browser-mcp] Rejected WebSocket connection from disallowed Origin: ${origin ?? "(none)"}`,
+      );
       try {
         ws.close(4403, "origin not allowed");
       } catch {
@@ -328,7 +330,7 @@ export async function startExtensionWebSocketServer(
         pongDeadline = setTimeout(() => {
           missedPongs += 1;
           if (missedPongs >= 2) {
-            console.error(
+            log(
               "[poke-browser-mcp] WebSocket client missed pong deadline twice; terminating client",
             );
             stopPing();
@@ -393,7 +395,7 @@ export async function startExtensionWebSocketServer(
         }
         const token = typeof msg.token === "string" ? msg.token : "";
         if (authRequired && token !== expectedToken) {
-          console.warn("[poke-browser-mcp] WebSocket auth rejected: token mismatch");
+          logError("[poke-browser-mcp] WebSocket auth rejected: token mismatch");
           try {
             ws.send(JSON.stringify({ type: "auth_error", error: "invalid_token" }));
           } catch {
@@ -415,7 +417,8 @@ export async function startExtensionWebSocketServer(
           /* ignore */
         }
         startPing();
-        console.error(
+        logNotice("  ✓ Browser connected");
+        log(
           authRequired
             ? "[poke-browser-mcp] Extension WebSocket client authenticated"
             : "[poke-browser-mcp] Extension WebSocket client connected (dev mode, no token check)",
@@ -460,11 +463,11 @@ export async function startExtensionWebSocketServer(
           b.rejectAllPending("Chrome extension WebSocket disconnected");
         }
       }
-      console.error("[poke-browser-mcp] Extension WebSocket client disconnected");
+      log("[poke-browser-mcp] Extension WebSocket client disconnected");
     });
 
     ws.on("error", (err) => {
-      console.error("[poke-browser-mcp] WebSocket socket error:", err.message);
+      log("[poke-browser-mcp] WebSocket socket error:", err.message);
       stopPing();
       trackedClients.delete(ws);
     });
@@ -472,8 +475,8 @@ export async function startExtensionWebSocketServer(
 
   await waitForWebSocketListening(wss);
   extensionWebSocketServer = wss;
-  console.error(`[poke-browser-mcp] WebSocket listening on ws://127.0.0.1:${port}`);
-  console.error("[poke-browser-mcp] Load the poke-browser extension and keep this process running.");
+  log(`[poke-browser-mcp] WebSocket listening on ws://127.0.0.1:${port}`);
+  log("[poke-browser-mcp] Load the poke-browser extension and keep this process running.");
 
   return wss;
 }

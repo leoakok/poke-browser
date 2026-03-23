@@ -39,6 +39,15 @@ function logCommand(direction, summary) {
   if (commandLog.length > LOG_MAX) commandLog.length = LOG_MAX;
   try {
     if (chrome.runtime?.id) {
+      const t = new Date();
+      const stamp = t.toLocaleTimeString(undefined, { hour12: false });
+      const arrow = direction === "in" ? "←" : "→";
+      chrome.runtime
+        .sendMessage({
+          type: "log",
+          message: `[${stamp}] ${arrow} ${summary}`,
+        })
+        .catch(() => {});
       chrome.runtime.sendMessage({ type: "POKE_LOG_UPDATE" }).catch(() => {});
     }
   } catch {

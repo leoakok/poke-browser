@@ -3,8 +3,13 @@ const statusText = document.getElementById("statusText");
 const portUrlEl = document.getElementById("portUrl");
 const mcpEnabled = document.getElementById("mcpEnabled");
 const versionEl = document.getElementById("version");
+const logsSection = document.getElementById("logsSection");
+const logsToggle = document.getElementById("logsToggle");
+
+const { version } = chrome.runtime.getManifest();
 
 const DEFAULT_PORT = 9009;
+const LOG_LIST_MAX = 50;
 
 function normalizePort(value) {
   const n = Number(value);
@@ -44,9 +49,21 @@ async function syncFromBackgroundStatus() {
   }
 }
 
+function prependLogLine(text) {
+  const list = document.getElementById("log-list");
+  if (!list) return;
+  const line = document.createElement("div");
+  line.className = "log-line";
+  line.textContent = text;
+  list.insertBefore(line, list.firstChild);
+  while (list.children.length > LOG_LIST_MAX) {
+    list.removeChild(list.lastChild);
+  }
+}
+
 async function load() {
   if (versionEl) {
-    versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
+    versionEl.textContent = `v${version}`;
   }
 
   const stored = await chrome.storage.local.get(["enabled", "port", "wsPort"]);
@@ -69,6 +86,14 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.type === "POKE_LOG_UPDATE") {
     void syncFromBackgroundStatus();
   }
+  if (msg?.type === "log" && typeof msg.message === "string") {
+    prependLogLine(msg.message);
+  }
+});
+
+logsToggle?.addEventListener("click", () => {
+  const expanded = logsSection?.classList.toggle("expanded");
+  logsToggle?.setAttribute("aria-expanded", expanded ? "true" : "false");
 });
 
 mcpEnabled?.addEventListener("change", async () => {

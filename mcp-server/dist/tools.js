@@ -9,6 +9,7 @@ import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import { log } from "./logger.js";
 import { bridge, EVALUATE_JS_TIMEOUT_MS, extensionBridgeDisconnectedMessage, isRecord, isScreenshotResultPayload, jsonText, PENDING_REQUEST_TIMEOUT_MS, RateLimitError, } from "./transport.js";
 /** Stderr-only; stdout is MCP JSON-RPC. Log each MCP tool dispatch for operators. */
 function logToolCall(name, args) {
@@ -19,7 +20,7 @@ function logToolCall(name, args) {
     catch {
         payload = String(args);
     }
-    console.error("[poke-browser]", name, payload);
+    log("[poke-browser]", name, payload);
 }
 export function toolText(data) {
     return {
