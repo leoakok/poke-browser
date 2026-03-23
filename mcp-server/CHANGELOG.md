@@ -1,3 +1,10 @@
+## [0.4.2](https://github.com/leoakok/poke-browser/compare/v0.4.1...v0.4.2) (2026-03-23)
+
+
+### Bug Fixes
+
+* **extension:** route poke sends through local proxy ([04ee678](https://github.com/leoakok/poke-browser/commit/04ee6785f4274ec393e409107c44bf3a7cefdb65))
+
 ## [0.4.1](https://github.com/leoakok/poke-browser/compare/v0.4.0...v0.4.1) (2026-03-23)
 
 
