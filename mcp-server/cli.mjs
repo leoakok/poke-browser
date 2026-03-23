@@ -11,6 +11,18 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stderr as output } from "node:process";
 
+async function findAvailablePort(startPort) {
+  const net = await import("node:net");
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.listen(startPort, "127.0.0.1", () => {
+      const port = server.address().port;
+      server.close(() => resolve(port));
+    });
+    server.on("error", () => resolve(findAvailablePort(startPort + 1)));
+  });
+}
+
 const require = createRequire(import.meta.url);
 const pkg = require("./package.json");
 const VERSION = pkg.version;
@@ -117,8 +129,16 @@ function extensionFolderPath() {
   return join(root, "..", "extension");
 }
 
-function printQuietStartupBanner() {
+function printQuietStartupBanner({
+  mcpPort,
+  wsPort,
+  mcpDesiredStart,
+  wsDesiredStart,
+  showMcpLine,
+}) {
   const extPath = extensionFolderPath();
+  const mcpAuto = mcpPort !== mcpDesiredStart ? " (auto-selected)" : "";
+  const wsAuto = wsPort !== wsDesiredStart ? " (auto-selected)" : "";
   console.error("");
   console.error(
     customMcpName
@@ -145,6 +165,12 @@ function printQuietStartupBanner() {
   console.error("  ★ Star us: https://github.com/leoakok/poke-browser");
   console.error("");
   console.error("  ─────────────────────────────────────");
+  if (showMcpLine) {
+    console.error(
+      `  Local MCP:  http://127.0.0.1:${mcpPort}/mcp${mcpAuto}`,
+    );
+  }
+  console.error(`  Local WS:   ws://127.0.0.1:${wsPort}${wsAuto}`);
   console.error("");
 }
 
@@ -212,6 +238,42 @@ const childArgs = rawArgs.filter((a, i, arr) => {
   return true;
 });
 
+function readMcpDesiredStartFromCliArgs(args) {
+  const i = args.indexOf("--http");
+  if (i === -1) return null;
+  const next = args[i + 1];
+  if (next != null && /^\d+$/.test(String(next))) return Math.trunc(Number(next));
+  return null;
+}
+
+function readMcpDesiredStart(args) {
+  const fromCli = readMcpDesiredStartFromCliArgs(args);
+  if (fromCli !== null) return fromCli;
+  const raw =
+    process.env.POKE_BROWSER_MCP_PORT ??
+    process.env.POKE_BROWSER_PORT ??
+    "8755";
+  const httpPort = Number(raw);
+  return Number.isFinite(httpPort) && httpPort > 0 && httpPort <= 65535
+    ? Math.trunc(httpPort)
+    : 8755;
+}
+
+function readWsDesiredStart() {
+  const raw = process.env.POKE_BROWSER_WS_PORT ?? "9009";
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 && n <= 65535 ? Math.trunc(n) : 9009;
+}
+
+function cloneArgsWithResolvedMcpPort(args, mcpPort) {
+  const out = [...args];
+  const i = out.indexOf("--http");
+  if (i !== -1 && out[i + 1] != null && /^\d+$/.test(String(out[i + 1]))) {
+    out[i + 1] = String(mcpPort);
+  }
+  return out;
+}
+
 function runBuild() {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const b = spawnSync(npm, ["run", "build"], {
@@ -239,36 +301,52 @@ if (!existsSync(entry)) {
   process.exit(1);
 }
 
-printQuietStartupBanner();
+(async () => {
+  const mcpDesiredStart = readMcpDesiredStart(childArgs);
+  const wsDesiredStart = readWsDesiredStart();
+  const mcpPort = await findAvailablePort(mcpDesiredStart);
+  const wsPort = await findAvailablePort(wsDesiredStart);
+  const showMcpLine =
+    wantPokeTunnelFlow || childArgs.includes("--http");
+  const envWithPorts = {
+    ...childEnv(),
+    POKE_BROWSER_MCP_PORT: String(mcpPort),
+    POKE_BROWSER_WS_PORT: String(wsPort),
+  };
 
-if (wantPokeTunnelFlow) {
-  if (!ensurePokeLoginForTunnel()) {
-    process.exit(1);
+  printQuietStartupBanner({
+    mcpPort,
+    wsPort,
+    mcpDesiredStart,
+    wsDesiredStart,
+    showMcpLine,
+  });
+
+  const resolvedChildArgs = cloneArgsWithResolvedMcpPort(childArgs, mcpPort);
+
+  if (wantPokeTunnelFlow) {
+    if (!ensurePokeLoginForTunnel()) {
+      process.exit(1);
+    }
+    console.error(color.green("  Signed in to Poke — starting HTTP MCP and tunnel."));
+    console.error(
+      color.dim("  Poke can use poke-browser while this window stays open."),
+    );
+    console.error("");
+    const r = spawnSync(
+      process.execPath,
+      [entry, "--http", String(mcpPort), "--tunnel", ...resolvedChildArgs],
+      { stdio: "inherit", env: envWithPorts },
+    );
+    process.exit(r.status ?? 1);
   }
-  console.error(color.green("  Signed in to Poke — starting HTTP MCP and tunnel."));
-  console.error(
-    color.dim("  Poke can use poke-browser while this window stays open."),
-  );
-  console.error("");
-  const rawHttp =
-    process.env.POKE_BROWSER_MCP_PORT ??
-    process.env.POKE_BROWSER_PORT ??
-    "8755";
-  const httpPort = Number(rawHttp);
-  const portArg =
-    Number.isFinite(httpPort) && httpPort > 0 && httpPort <= 65535
-      ? String(Math.trunc(httpPort))
-      : "8755";
-  const r = spawnSync(
-    process.execPath,
-    [entry, "--http", portArg, "--tunnel", ...childArgs],
-    { stdio: "inherit", env: childEnv() },
-  );
-  process.exit(r.status ?? 1);
-}
 
-const r = spawnSync(process.execPath, [entry, ...childArgs], {
-  stdio: "inherit",
-  env: childEnv(),
+  const r = spawnSync(process.execPath, [entry, ...resolvedChildArgs], {
+    stdio: "inherit",
+    env: envWithPorts,
+  });
+  process.exit(r.status ?? 1);
+})().catch((err) => {
+  console.error(err);
+  process.exit(1);
 });
-process.exit(r.status ?? 1);
