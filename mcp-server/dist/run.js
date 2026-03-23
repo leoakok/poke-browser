@@ -235,31 +235,6 @@ async function runHttp(opts) {
     if (opts.spawnTunnel) {
         log("[poke-browser-mcp] Tunnel output from Poke follows.");
         log("");
-        let tunnelErrBuf = "";
-        let tunnelUrlReported = false;
-        let localWsLinePrinted = false;
-        const printLocalWsLine = () => {
-            if (localWsLinePrinted)
-                return;
-            localWsLinePrinted = true;
-            logNotice(`  Local WS:  ws://127.0.0.1:${WS_PORT}`);
-        };
-        const reportLocalTunnelLineFromBuffer = () => {
-            if (localWsLinePrinted)
-                return;
-            if (!/\bLocal:\s*http:\/\/[^\s"'<>]+/i.test(tunnelErrBuf))
-                return;
-            printLocalWsLine();
-        };
-        const reportTunnelUrlFromBuffer = () => {
-            if (tunnelUrlReported)
-                return;
-            const m = tunnelErrBuf.match(/https:\/\/[^\s"'<>]+\/mcp\b/);
-            if (m) {
-                tunnelUrlReported = true;
-                logNotice(`  ✓ Tunnel: ${m[0]}`);
-            }
-        };
         const tunnel = spawn("npx", [
             "--yes",
             "poke@latest",
@@ -267,16 +242,7 @@ async function runHttp(opts) {
             url,
             "-n",
             pokeTunnelLabel,
-        ], { stdio: ["inherit", "inherit", "pipe"], env: process.env });
-        tunnel.stderr?.on("data", (chunk) => {
-            process.stderr.write(chunk);
-            tunnelErrBuf += chunk.toString("utf8");
-            if (tunnelErrBuf.length > 24_000) {
-                tunnelErrBuf = tunnelErrBuf.slice(-24_000);
-            }
-            reportLocalTunnelLineFromBuffer();
-            reportTunnelUrlFromBuffer();
-        });
+        ], { stdio: "inherit", env: process.env });
         tunnel.on("error", (err) => {
             logError(`[poke-browser-mcp] Could not start the Poke tunnel: ${err.message}`);
             if (err.code === "ENOENT") {
@@ -289,11 +255,7 @@ async function runHttp(opts) {
         });
         tunnelChild = tunnel;
         setTimeout(() => {
-            if (!tunnelUrlReported) {
-                log("[poke-browser] Tunnel: (public URL is printed by the Poke CLI above — ends with /mcp)");
-            }
-            if (!localWsLinePrinted)
-                printLocalWsLine();
+            logNotice(`  Local WS:  ws://127.0.0.1:${WS_PORT}`);
             log("[poke-browser] Ready. Load the Chrome extension and connect your MCP client.");
         }, 2500);
     }

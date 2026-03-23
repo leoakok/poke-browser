@@ -296,28 +296,6 @@ async function runHttp(opts: {
     log("[poke-browser-mcp] Tunnel output from Poke follows.");
     log("");
 
-    let tunnelErrBuf = "";
-    let tunnelUrlReported = false;
-    let localWsLinePrinted = false;
-    const printLocalWsLine = (): void => {
-      if (localWsLinePrinted) return;
-      localWsLinePrinted = true;
-      logNotice(`  Local WS:  ws://127.0.0.1:${WS_PORT}`);
-    };
-    const reportLocalTunnelLineFromBuffer = (): void => {
-      if (localWsLinePrinted) return;
-      if (!/\bLocal:\s*http:\/\/[^\s"'<>]+/i.test(tunnelErrBuf)) return;
-      printLocalWsLine();
-    };
-    const reportTunnelUrlFromBuffer = (): void => {
-      if (tunnelUrlReported) return;
-      const m = tunnelErrBuf.match(/https:\/\/[^\s"'<>]+\/mcp\b/);
-      if (m) {
-        tunnelUrlReported = true;
-        logNotice(`  ✓ Tunnel: ${m[0]}`);
-      }
-    };
-
     const tunnel = spawn(
       "npx",
       [
@@ -328,18 +306,8 @@ async function runHttp(opts: {
         "-n",
         pokeTunnelLabel,
       ],
-      { stdio: ["inherit", "inherit", "pipe"], env: process.env },
+      { stdio: "inherit", env: process.env },
     );
-
-    tunnel.stderr?.on("data", (chunk: Buffer) => {
-      process.stderr.write(chunk);
-      tunnelErrBuf += chunk.toString("utf8");
-      if (tunnelErrBuf.length > 24_000) {
-        tunnelErrBuf = tunnelErrBuf.slice(-24_000);
-      }
-      reportLocalTunnelLineFromBuffer();
-      reportTunnelUrlFromBuffer();
-    });
 
     tunnel.on("error", (err: NodeJS.ErrnoException) => {
       logError(
@@ -360,12 +328,7 @@ async function runHttp(opts: {
     tunnelChild = tunnel;
 
     setTimeout(() => {
-      if (!tunnelUrlReported) {
-        log(
-          "[poke-browser] Tunnel: (public URL is printed by the Poke CLI above — ends with /mcp)",
-        );
-      }
-      if (!localWsLinePrinted) printLocalWsLine();
+      logNotice(`  Local WS:  ws://127.0.0.1:${WS_PORT}`);
       log(
         "[poke-browser] Ready. Load the Chrome extension and connect your MCP client.",
       );
