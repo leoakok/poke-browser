@@ -54,7 +54,7 @@ jobs:
       - name: Publish to npm
         working-directory: mcp-server
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPMTOKEN }}
         run: npm publish --access public
 
       - name: Create Git tag
