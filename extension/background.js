@@ -43,6 +43,11 @@ const POKE_TERMINAL_ONLY_INSTRUCTION =
   "Be strict: immediately start the browser process and proceed with the requested browser actions.\n" +
   "[END BROWSER EXTENSION SESSION]\n\n";
 
+const POKE_TERMINAL_FALLBACK_INSTRUCTION =
+  "[BROWSER SESSION]\n" +
+  "No chat reply. No iMessage/SMS/Telegram reply.\n" +
+  "Start browser actions immediately and respond only through tool/terminal channel.\n\n";
+
 function logCommand(direction, summary) {
   commandLog.unshift({ ts: Date.now(), direction, summary });
   if (commandLog.length > LOG_MAX) commandLog.length = LOG_MAX;
@@ -62,6 +67,47 @@ function logCommand(direction, summary) {
   } catch {
     /* extension context invalidated */
   }
+}
+
+/**
+ * @param {string} apiKey
+ * @param {string} message
+ */
+async function postPokeMessage(apiKey, message) {
+  const resp = await fetch("https://poke.com/api/v1/inbound/api-message", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ message }),
+  });
+
+  if (resp.ok) {
+    const data = await resp.json().catch(() => null);
+    return { ok: true, data };
+  }
+
+  const bodyText = await resp.text();
+  let serverMsg = "";
+  try {
+    const parsed = JSON.parse(bodyText);
+    serverMsg =
+      typeof parsed?.error === "string"
+        ? parsed.error
+        : typeof parsed?.message === "string"
+          ? parsed.message
+          : "";
+  } catch {
+    /* non-json response body */
+  }
+
+  return {
+    ok: false,
+    status: resp.status,
+    statusText: resp.statusText || "",
+    serverMsg: serverMsg || bodyText.slice(0, 300),
+  };
 }
 
 async function getWsPort() {
@@ -1993,37 +2039,45 @@ const RUNTIME_HANDLERS = {
         return;
       }
       try {
-        const fullMessage = `${POKE_TERMINAL_ONLY_INSTRUCTION}${userMessage}`;
-        const resp = await fetch("https://poke.com/api/v1/inbound/api-message", {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ message: fullMessage }),
-        });
-        if (!resp.ok) {
-          const bodyText = await resp.text();
-          let serverMsg = "";
-          try {
-            const parsed = JSON.parse(bodyText);
-            serverMsg =
-              typeof parsed?.error === "string"
-                ? parsed.error
-                : typeof parsed?.message === "string"
-                  ? parsed.message
-                  : "";
-          } catch {
-            /* keep raw status */
+        const primary = await postPokeMessage(
+          apiKey,
+          `${POKE_TERMINAL_ONLY_INSTRUCTION}${userMessage}`,
+        );
+
+        if (primary.ok) {
+          sendResponse({ ok: true, data: primary.data });
+          return;
+        }
+
+        // If backend fails with a 5xx, retry once with shorter strict instruction.
+        if (primary.status >= 500) {
+          const fallback = await postPokeMessage(
+            apiKey,
+            `${POKE_TERMINAL_FALLBACK_INSTRUCTION}${userMessage}`,
+          );
+          if (fallback.ok) {
+            sendResponse({
+              ok: true,
+              data: fallback.data,
+              warning: `Primary prompt failed with ${primary.status}; fallback succeeded.`,
+            });
+            return;
           }
           sendResponse({
             ok: false,
-            error: serverMsg || `Poke API error (${resp.status}).`,
+            error:
+              `Poke API error (${fallback.status}). ` +
+              (fallback.serverMsg || fallback.statusText || "Unknown server error."),
           });
           return;
         }
-        const data = await resp.json().catch(() => null);
-        sendResponse({ ok: true, data });
+
+        sendResponse({
+          ok: false,
+          error:
+            `Poke API error (${primary.status}). ` +
+            (primary.serverMsg || primary.statusText || "Unknown server error."),
+        });
       } catch (err) {
         sendResponse({
           ok: false,

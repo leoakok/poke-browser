@@ -260,6 +260,20 @@
         min-height: 14px;
       }
 
+      .inline-link {
+        margin-top: 6px;
+        font-size: 11px;
+      }
+
+      .inline-link a {
+        color: #a78bfa;
+        text-decoration: none;
+      }
+
+      .inline-link a:hover {
+        text-decoration: underline;
+      }
+
       .toggle-label {
         font-size: 13px;
         color: var(--text-primary);
@@ -488,6 +502,9 @@
       <div class="actions-row">
         <button type="button" id="save-api-key-btn" class="btn">Save key</button>
         <button type="button" id="clear-api-key-btn" class="btn">Clear key</button>
+      </div>
+      <div class="inline-link">
+        <a href="https://poke.com/kitchen/api-keys" target="_blank" rel="noopener noreferrer">Get an API key from Poke Kitchen</a>
       </div>
       <div class="mini-status" id="api-key-status"></div>
     </section>
