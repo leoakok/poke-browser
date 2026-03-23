@@ -1,6 +1,6 @@
 {
   "name": "@leokok/poke-browser",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "MCP server + WebSocket bridge for the poke-browser Chrome extension",
   "type": "module",
   "engines": {
