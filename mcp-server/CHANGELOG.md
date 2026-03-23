@@ -1,3 +1,10 @@
+## [0.4.1](https://github.com/leoakok/poke-browser/compare/v0.4.0...v0.4.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* **extension:** improve poke send reliability and api key guidance ([7b7a996](https://github.com/leoakok/poke-browser/commit/7b7a996a47c22f53fe0814d844f257823f90a0a0))
+
 # [0.4.0](https://github.com/leoakok/poke-browser/compare/v0.3.0...v0.4.0) (2026-03-23)
 
 
