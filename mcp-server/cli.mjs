@@ -29,12 +29,14 @@ const color =
         bold: (s) => `\x1b[1m${s}\x1b[0m`,
         green: (s) => `\x1b[32m${s}\x1b[0m`,
         red: (s) => `\x1b[31m${s}\x1b[0m`,
+        grey: (s) => `\x1b[90m${s}\x1b[0m`,
       }
     : {
         dim: (s) => s,
         bold: (s) => s,
         green: (s) => s,
         red: (s) => s,
+        grey: (s) => s,
       };
 
 /** Same check as poke-apple-music `checkPokeLogin`. */
@@ -104,10 +106,17 @@ function printQuietStartupBanner() {
   console.error("");
   console.error("  2. Enable Developer Mode");
   console.error("");
-  console.error('  3. Click "Load unpacked" and select the extension folder:');
-  console.error(`     ${extPath}`);
+  console.error("  3. Click Load unpacked → select the /extension folder");
+  console.error(
+    color.grey(
+      "     (NOT the root — open poke-browser/extension specifically)",
+    ),
+  );
+  console.error(color.dim(`     ${extPath}`));
   console.error("");
   console.error("  4. Extension auto-connects to this server");
+  console.error("");
+  console.error("  ★ Star us: https://github.com/leoakok/poke-browser");
   console.error("");
   console.error("  ─────────────────────────────────────");
   console.error("");
