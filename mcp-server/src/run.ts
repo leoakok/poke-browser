@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { PassThrough } from "node:stream";
 import type { Request, Response } from "express";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -25,6 +26,7 @@ let stdioMcpConnected = false;
 let mcpTransport: StdioServerTransport | null = null;
 
 let tunnelChild: ChildProcess | null = null;
+let pokeProxyServerRunning = false;
 
 let processGuardsInstalled = false;
 
@@ -100,6 +102,113 @@ function installShutdownHandlers(): void {
   shutdownHandlersInstalled = true;
   process.on("SIGINT", () => shutdownWithTimeout("SIGINT"));
   process.on("SIGTERM", () => shutdownWithTimeout("SIGTERM"));
+}
+
+function readRequestBody(req: IncomingMessage, limitBytes = 64 * 1024): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    let size = 0;
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => {
+      size += Buffer.byteLength(chunk, "utf8");
+      if (size > limitBytes) {
+        reject(new Error("Request body too large"));
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
+}
+
+function writeJson(res: ServerResponse, status: number, payload: unknown): void {
+  const body = JSON.stringify(payload);
+  res.statusCode = status;
+  res.setHeader("content-type", "application/json; charset=utf-8");
+  res.setHeader("content-length", String(Buffer.byteLength(body, "utf8")));
+  // Allow extension clients (chrome-extension://...) to call localhost proxy.
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("access-control-allow-methods", "POST, OPTIONS");
+  res.setHeader("access-control-allow-headers", "content-type");
+  res.end(body);
+}
+
+async function startPokeLocalProxyServer(wsPort: number): Promise<void> {
+  if (pokeProxyServerRunning) return;
+  const proxyPort = wsPort + 1;
+
+  const server = createServer(async (req, res) => {
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      res.setHeader("access-control-allow-origin", "*");
+      res.setHeader("access-control-allow-methods", "POST, OPTIONS");
+      res.setHeader("access-control-allow-headers", "content-type");
+      res.end();
+      return;
+    }
+
+    if (req.method !== "POST" || req.url !== "/poke/send-message") {
+      writeJson(res, 404, { error: "Not found" });
+      return;
+    }
+
+    try {
+      const raw = await readRequestBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        writeJson(res, 400, { error: "Invalid JSON body" });
+        return;
+      }
+
+      const body = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
+      const message = typeof body.message === "string" ? body.message : "";
+
+      if (!apiKey || !message.trim()) {
+        writeJson(res, 400, { error: "apiKey and message are required" });
+        return;
+      }
+
+      const upstream = await fetch("https://poke.com/api/v1/inbound/api-message", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ message }),
+      });
+
+      const text = await upstream.text();
+      let json: unknown = { error: { message: text || upstream.statusText, status: upstream.status } };
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // keep fallback object
+      }
+      writeJson(res, upstream.status, json);
+    } catch (err) {
+      writeJson(res, 500, {
+        error: {
+          message: err instanceof Error ? err.message : String(err),
+          status: 500,
+        },
+      });
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.listen(proxyPort, "127.0.0.1", (err?: Error) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+
+  pokeProxyServerRunning = true;
+  log(`[poke-browser-mcp] Local Poke proxy → http://127.0.0.1:${proxyPort}/poke/send-message`);
 }
 
 export type RunMode = "stdio" | "http" | "http-tunnel";
@@ -185,6 +294,7 @@ async function runStdio(): Promise<void> {
   const WS_PORT = readPort();
   try {
     await logAndStartExtensionWebSocket(WS_PORT);
+    await startPokeLocalProxyServer(WS_PORT);
   } catch (err) {
     logError(
       "[poke-browser-mcp] WebSocket server failed to bind (is another poke-browser or process using the port?):",
@@ -234,6 +344,7 @@ async function runHttp(opts: {
   const WS_PORT = readPort();
   try {
     await logAndStartExtensionWebSocket(WS_PORT);
+    await startPokeLocalProxyServer(WS_PORT);
   } catch (err) {
     logError("[poke-browser-mcp] WebSocket server failed to bind:", err);
     process.exit(1);

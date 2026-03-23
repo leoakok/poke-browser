@@ -39,6 +39,10 @@ const POKE_TERMINAL_ONLY_INSTRUCTION =
   "You are in a browser extension initiated terminal-style session.\n" +
   "DO NOT reply via iMessage. DO NOT reply via SMS. DO NOT reply via Telegram.\n" +
   "DO NOT send any normal chat reply text.\n" +
+  "You MUST use browser MCP tools for actions.\n" +
+  "The user is probably already on the target page.\n" +
+  "Start with a screenshot tool call first to understand current page state.\n" +
+  "Continue from the current page and avoid navigate_to unless absolutely needed.\n" +
   "Your only allowed behavior is to execute browser tasks and deliver output through the terminal/tool channel.\n" +
   "Be strict: immediately start the browser process and proceed with the requested browser actions.\n" +
   "[END BROWSER EXTENSION SESSION]\n\n";
@@ -46,6 +50,7 @@ const POKE_TERMINAL_ONLY_INSTRUCTION =
 const POKE_TERMINAL_FALLBACK_INSTRUCTION =
   "[BROWSER SESSION]\n" +
   "No chat reply. No iMessage/SMS/Telegram reply.\n" +
+  "Use browser MCP tools. Take screenshot first, continue from current page, avoid navigate_to unless needed.\n" +
   "Start browser actions immediately and respond only through tool/terminal channel.\n\n";
 
 function logCommand(direction, summary) {
@@ -98,6 +103,52 @@ async function postPokeMessage(apiKey, message) {
         : typeof parsed?.message === "string"
           ? parsed.message
           : "";
+  } catch {
+    /* non-json response body */
+  }
+
+  return {
+    ok: false,
+    status: resp.status,
+    statusText: resp.statusText || "",
+    serverMsg: serverMsg || bodyText.slice(0, 300),
+  };
+}
+
+/**
+ * Prefer localhost proxy to avoid extension-origin upstream edge cases.
+ * @param {string} apiKey
+ * @param {string} message
+ */
+async function postPokeMessageViaLocalProxy(apiKey, message) {
+  const wsPort = await getWsPort();
+  const proxyPort = wsPort + 1;
+  const resp = await fetch(`http://127.0.0.1:${proxyPort}/poke/send-message`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ apiKey, message }),
+    signal: AbortSignal.timeout(3500),
+  });
+
+  if (resp.ok) {
+    const data = await resp.json().catch(() => null);
+    return { ok: true, data };
+  }
+
+  const bodyText = await resp.text();
+  let serverMsg = "";
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (parsed && typeof parsed === "object") {
+      const errObj = parsed.error;
+      if (errObj && typeof errObj === "object" && typeof errObj.message === "string") {
+        serverMsg = errObj.message;
+      } else if (typeof parsed.message === "string") {
+        serverMsg = parsed.message;
+      }
+    }
   } catch {
     /* non-json response body */
   }
@@ -2039,10 +2090,17 @@ const RUNTIME_HANDLERS = {
         return;
       }
       try {
-        const primary = await postPokeMessage(
-          apiKey,
-          `${POKE_TERMINAL_ONLY_INSTRUCTION}${userMessage}`,
-        );
+        const primaryPrompt = `${POKE_TERMINAL_ONLY_INSTRUCTION}${userMessage}`;
+        const fallbackPrompt = `${POKE_TERMINAL_FALLBACK_INSTRUCTION}${userMessage}`;
+
+        // First path: localhost proxy through poke-browser Node process.
+        let primary;
+        try {
+          primary = await postPokeMessageViaLocalProxy(apiKey, primaryPrompt);
+        } catch {
+          // Proxy unavailable; fallback to direct extension fetch.
+          primary = await postPokeMessage(apiKey, primaryPrompt);
+        }
 
         if (primary.ok) {
           sendResponse({ ok: true, data: primary.data });
@@ -2051,10 +2109,12 @@ const RUNTIME_HANDLERS = {
 
         // If backend fails with a 5xx, retry once with shorter strict instruction.
         if (primary.status >= 500) {
-          const fallback = await postPokeMessage(
-            apiKey,
-            `${POKE_TERMINAL_FALLBACK_INSTRUCTION}${userMessage}`,
-          );
+          let fallback;
+          try {
+            fallback = await postPokeMessageViaLocalProxy(apiKey, fallbackPrompt);
+          } catch {
+            fallback = await postPokeMessage(apiKey, fallbackPrompt);
+          }
           if (fallback.ok) {
             sendResponse({
               ok: true,
