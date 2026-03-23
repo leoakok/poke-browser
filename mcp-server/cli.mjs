@@ -212,7 +212,7 @@ function childEnv() {
 }
 
 if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
-  console.error(`@leokok/poke-browser \u2014 MCP server for the poke-browser Chrome extension
+  console.error(`poke-browser \u2014 MCP server for the poke-browser Chrome extension
 
 Usage:
   poke-browser                    Poke tunnel mode when run in a terminal (default)
@@ -383,7 +383,7 @@ if (!existsSync(entry)) {
       const https = await import("node:https");
       const latest = await new Promise((resolve, reject) => {
         const req = https.get(
-          "https://registry.npmjs.org/@leokok%2fpoke-browser/latest",
+          "https://registry.npmjs.org/poke-browser/latest",
           { timeout: 3000 },
           (res) => {
             let data = "";
@@ -413,7 +413,7 @@ if (!existsSync(entry)) {
             ")\x1b[0m",
         );
         console.log(
-          "\x1b[90m     npx @leokok/poke-browser@latest\x1b[0m\n",
+          "\x1b[90m     npx poke-browser@latest\x1b[0m\n",
         );
       }
     } catch {}

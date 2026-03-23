@@ -18,7 +18,7 @@ const LOG_LIST_MAX = 50;
 
 function checkForUpdates() {
   const currentVersion = chrome.runtime.getManifest().version;
-  fetch("https://registry.npmjs.org/@leokok%2fpoke-browser/latest", {
+  fetch("https://registry.npmjs.org/poke-browser/latest", {
     signal: AbortSignal.timeout(5000),
   })
     .then((r) => r.json())
@@ -30,7 +30,7 @@ function checkForUpdates() {
           updateEl.textContent =
             "⚡ v" +
             latestVersion +
-            " available — npx @leokok/poke-browser@latest";
+            " available — npx poke-browser@latest";
           updateEl.style.display = "block";
         }
       }

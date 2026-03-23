@@ -1,9 +1,9 @@
 # CI on every PR and every branch push.
-# CD (patch bump + npm publish @leokok/poke-browser) only on push to main after CI passes.
+# CD (patch bump + npm publish poke-browser) only on push to main after CI passes.
 # Aligned with leoakok/poke-agents ci-release.yml pattern.
 #
 # Secrets required:
-#   NPM_TOKEN — npm publish token for @leokok/poke-browser
+#   NPM_TOKEN — npm publish token for the unscoped package poke-browser
 
 name: CI and Release
 
@@ -111,7 +111,7 @@ jobs:
               repo: context.repo.repo,
               tag_name: `v${{ env.NEW_VERSION }}`,
               name: `v${{ env.NEW_VERSION }}`,
-              body: `## @leokok/poke-browser v${{ env.NEW_VERSION }}\n\n### Install\n\`\`\`\nnpx @leokok/poke-browser\n\`\`\`\n\n### Links\n- [npm](https://www.npmjs.com/package/@leokok/poke-browser)\n- [GitHub](https://github.com/leoakok/poke-browser)`,
+              body: `## poke-browser v${{ env.NEW_VERSION }}\n\n### Install\n\`\`\`\nnpx poke-browser@latest\n\`\`\`\n\n### Links\n- [npm](https://www.npmjs.com/package/poke-browser)\n- [GitHub](https://github.com/leoakok/poke-browser)`,
               draft: false,
               prerelease: false
             });
