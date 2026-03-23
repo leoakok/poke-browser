@@ -58,6 +58,7 @@ const entry = join(root, "dist", "index.js");
 const rawArgs = process.argv.slice(2);
 const verboseCli =
   rawArgs.includes("--debug") || rawArgs.includes("--verbose");
+const autoYes = rawArgs.includes("-y") || rawArgs.includes("--yes");
 
 /** Same shape as @leokok/poke-agents `argAfter` (used there for `--mcp-name`). */
 function argAfter(flag) {
@@ -78,8 +79,8 @@ function slugifyMcpServerName(s) {
   return t.length > 64 ? t.slice(0, 64) : t;
 }
 
-/** Custom Poke tunnel `-n` label + MCP `initialize` server name (when `--name` is passed). */
-const customMcpName = argAfter("--name");
+/** Custom Poke tunnel `-n` label + MCP `initialize` server name. */
+const customMcpName = argAfter("--name") ?? argAfter("-n");
 
 const color =
   output.isTTY && !process.env.NO_COLOR
@@ -169,29 +170,13 @@ function printQuietStartupBanner({
   console.error("");
   console.error(
     customMcpName
-      ? `  poke-browser v${VERSION} (as '${customMcpName}')`
-      : `  poke-browser v${VERSION}`,
+      ? `  Poke 🌴 / Browser v${VERSION} (as "${customMcpName}")`
+      : `  Poke 🌴 / Browser v${VERSION}`,
   );
+  console.error(`  ${color.dim("Quick start:")} keep this running, then use your MCP client.`);
+  console.error(`  ${color.dim("Guide: https://github.com/leoakok/poke-browser")}`);
+  console.error(`  ${color.dim("Load extension folder:")} ${extPath}`);
   console.error("");
-  console.error("  Load the Chrome extension:");
-  console.error("");
-  console.error("  1. Open chrome://extensions");
-  console.error("");
-  console.error("  2. Enable Developer Mode");
-  console.error("");
-  console.error("  3. Click Load unpacked \u2192 select the /extension folder");
-  console.error(
-    color.grey(
-      "     (NOT the root \u2014 open poke-browser/extension specifically)",
-    ),
-  );
-  console.error(color.dim(`     ${extPath}`));
-  console.error("");
-  console.error("  4. Extension auto-connects to this server");
-  console.error("");
-  console.error("  \u2605 Star us: https://github.com/leoakok/poke-browser");
-  console.error("");
-  console.error("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   if (showMcpLine) {
     console.error(
       `  Local MCP:  http://127.0.0.1:${mcpPort}/mcp${mcpAuto}`,
@@ -212,38 +197,23 @@ function childEnv() {
 }
 
 if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
-  console.error(`poke-browser \u2014 MCP server for the poke-browser Chrome extension
+  console.error(`Poke 🌴 / Browser
 
 Usage:
-  poke-browser                    Poke tunnel mode when run in a terminal (default)
-  poke-browser --poke-tunnel      Same as above (explicit)
-  poke-browser --stdio            Force stdio MCP mode (Cursor, Claude Desktop, etc.)
-  poke-browser --http [port]      Streamable HTTP MCP on 127.0.0.1 (default: env POKE_BROWSER_MCP_PORT or 8755)
-  poke-browser --tunnel [port]    Same as --http, then: npx poke@latest tunnel \u2026/mcp
-  poke-browser --name <label>     Poke tunnel -n label and MCP server id
-  poke-browser --debug            Verbose stderr ([poke-browser], WebSocket port, MCP debug)
-  poke-browser --verbose          Same as --debug
+  poke-browser [--stdio|--http PORT|--tunnel PORT] [-n NAME] [-y]
 
-Mode selection (first match wins):
-  - stdin is NOT a TTY (piped)    \u2192 stdio mode  (Cursor / Claude Desktop auto-detection)
-  - --http or --stdio flag        \u2192 explicit HTTP / stdio mode
-  - interactive terminal          \u2192 poke-tunnel mode (shows public URL)
+Options:
+  -h, --help          show help
+  -v, --version       show version
+  -y, --yes           compatibility no-op
+  -n, --name NAME     tunnel label + MCP server name
+  --stdio             force stdio MCP mode
+  --http [port]       local HTTP MCP mode
+  --tunnel [port]     HTTP MCP + poke tunnel
+  --debug             verbose logs
 
-Poke auth (tunnel flows):
-  Uses the global Poke CLI \u2014 same as @leokok/poke-apple-music:
-    npx poke@latest whoami    # must succeed before tunnel
-    npx poke@latest login     # browser login if needed
-  Optional: POKE_BROWSER_SKIP_POKE_LOGIN=1 to skip the whoami/login gate.
-
-Environment:
-  POKE_BROWSER_WS_PORT          WebSocket port for the extension (default 9009)
-  POKE_BROWSER_MCP_PORT       HTTP MCP listen port for --http / tunnel (default 8755)
-  POKE_BROWSER_PORT             Alias for HTTP MCP port (same as run.ts)
-  POKE_BROWSER_TUNNEL_NAME      poke tunnel -n label (default: poke-browser; --name overrides)
-  POKE_BROWSER_MCP_SERVER_NAME  MCP initialize server name slug (set from --name when passed)
-
-Build once (or pass --build):
-  npm run build
+Guide:
+  https://github.com/leoakok/poke-browser
 `);
   process.exit(0);
 }
@@ -251,6 +221,11 @@ Build once (or pass --build):
 if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
   console.error(pkg.version ?? "0.0.0");
   process.exit(0);
+}
+
+if (autoYes) {
+  // Kept intentionally as a no-op to align launcher interfaces across poke CLIs.
+  process.env.POKE_BROWSER_YES = "1";
 }
 
 const wantBuild = rawArgs.includes("--build");
@@ -285,11 +260,14 @@ const childArgs = rawArgs.filter((a, i, arr) => {
     a === "--stdio" ||
     a === "--debug" ||
     a === "--verbose" ||
-    a === "--name"
+    a === "--name" ||
+    a === "-n" ||
+    a === "--yes" ||
+    a === "-y"
   ) {
     return false;
   }
-  if (i > 0 && arr[i - 1] === "--name") return false;
+  if (i > 0 && (arr[i - 1] === "--name" || arr[i - 1] === "-n")) return false;
   return true;
 });
 
@@ -405,16 +383,9 @@ if (!existsSync(entry)) {
       });
       const current = pkg.version;
       if (latest && latest !== current) {
-        console.log(
-          "\x1b[33m  \u26a1 Update available: v" +
-            latest +
-            " (you have v" +
-            current +
-            ")\x1b[0m",
-        );
-        console.log(
-          "\x1b[90m     npx poke-browser@latest\x1b[0m\n",
-        );
+        console.error(`  ${color.red("New version available:")} poke-browser@${latest}`);
+        console.error(`  ${color.dim("Run: npx poke-browser@latest")}`);
+        console.error("");
       }
     } catch {}
   })();

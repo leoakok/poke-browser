@@ -4,7 +4,7 @@ Control Chrome from MCP clients with one command.
 
 `poke-browser` runs an MCP server and bridges commands to the `poke-browser` Chrome extension over localhost WebSocket. It supports stdio MCP, HTTP MCP, and optional Poke tunnel mode for remote access.
 
-## Install
+## Fast start
 
 Use without install:
 
@@ -18,7 +18,7 @@ Or install as a dependency:
 npm install poke-browser
 ```
 
-## Quick start
+## Extension setup
 
 1. Start the launcher: `npx poke-browser@latest`
 2. Open `chrome://extensions`
@@ -51,7 +51,9 @@ poke-browser                 # auto mode: tunnel in interactive terminals, stdio
 poke-browser --stdio         # force stdio MCP mode
 poke-browser --http 8755     # MCP over HTTP at 127.0.0.1:8755/mcp
 poke-browser --tunnel 8755   # HTTP MCP + npx poke@latest tunnel
-poke-browser --name my-agent # custom tunnel label + MCP server name
+poke-browser -n my-agent     # custom tunnel label + MCP server name
+poke-browser --name my-agent # same as -n
+poke-browser -y              # compatibility no-op for shared launcher contract
 poke-browser --debug         # verbose logs
 ```
 
@@ -65,6 +67,7 @@ poke-browser --debug         # verbose logs
 | `POKE_BROWSER_TUNNEL_NAME` | `poke-browser` | Label for `poke tunnel -n` |
 | `POKE_BROWSER_MCP_SERVER_NAME` | `poke-browser-mcp` | MCP initialize server name |
 | `POKE_BROWSER_SKIP_POKE_LOGIN` | unset | Set to `1` to skip `poke whoami/login` preflight |
+| `POKE_BROWSER_YES` | unset | Set when `-y/--yes` is passed (compatibility marker) |
 
 Keep the extension popup WebSocket target aligned with `POKE_BROWSER_WS_PORT`.
 

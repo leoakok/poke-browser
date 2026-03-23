@@ -32,7 +32,7 @@ After every **`click_element`** call, **inspect the page again** with **`get_dom
    npx poke-browser@latest
    ```
 
-   Or install globally / add as a dependency: `npm install poke-browser`. From a local checkout under `mcp-server/`, use `npm install`, `npm run build`, and `npm start`. See [TESTING.md](./TESTING.md) for ports, env vars, and the inspector.
+   Or install globally / add as a dependency: `npm install poke-browser`. From a local checkout under `mcp-server/`, use `npm install`, `npm run build`, and `npm start`. Shared launcher flags: `-h/--help`, `-v/--version`, `-y/--yes`, and `-n/--name <label>`. See [TESTING.md](./TESTING.md) for ports, env vars, and the inspector.
 
 2. **Chrome extension**  
    Open `chrome://extensions`, enable **Developer mode**, **Load unpacked**, and select **this repository’s root folder** — the directory that contains `manifest.json` (the extension assets live alongside the manifest, not in a separate `extension/` directory).

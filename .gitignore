@@ -5,4 +5,5 @@ mcp-server/node_modules/
 .DS_Store
 .env
 *.log
+*.tgz
 .npmrc
