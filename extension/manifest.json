@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "poke-browser",
-  "version": "0.2.1",
+  "version": "0.2.0",
   "description": "Browser automation bridge for MCP agents via WebSocket.",
   "permissions": [
     "tabs",
