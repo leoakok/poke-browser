@@ -54,6 +54,24 @@ async function getWsPort() {
   return DEFAULT_WS_PORT;
 }
 
+async function getPokeEnabled() {
+  const { enabled } = await chrome.storage.local.get("enabled");
+  if (typeof enabled === "boolean") return enabled;
+  return true;
+}
+
+async function stopMcpConnection() {
+  try {
+    if (await chrome.offscreen.hasDocument()) {
+      await chrome.offscreen.closeDocument();
+    }
+  } catch (e) {
+    console.error("[poke-browser ext] closeDocument failed:", e);
+  }
+  bridgePort = null;
+  setStatus("disconnected");
+}
+
 async function getWsAuthToken() {
   const { wsAuthToken } = await chrome.storage.local.get("wsAuthToken");
   return typeof wsAuthToken === "string" ? wsAuthToken : "";
@@ -135,6 +153,7 @@ function scheduleKeepAliveAlarm() {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== KEEPALIVE_ALARM) return;
   void (async () => {
+    if (!(await getPokeEnabled())) return;
     try {
       await setupOffscreen();
     } catch (e) {
@@ -149,6 +168,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 async function ensureOffscreenAndSchedule() {
+  if (!(await getPokeEnabled())) {
+    return;
+  }
   try {
     await setupOffscreen();
   } catch (e) {
@@ -1820,19 +1842,38 @@ async function dispatchCommand(command, payload) {
 }
 
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get("wsPort").then((v) => {
-    if (v.wsPort == null) {
-      chrome.storage.local.set({ wsPort: DEFAULT_WS_PORT });
-    }
+  chrome.storage.local.get(["wsPort", "enabled"]).then((v) => {
+    const patch = {};
+    if (v.wsPort == null) patch.wsPort = DEFAULT_WS_PORT;
+    if (v.enabled === undefined) patch.enabled = true;
+    if (Object.keys(patch).length) chrome.storage.local.set(patch);
   });
-  void ensureOffscreenAndSchedule();
+  void (async () => {
+    if (await getPokeEnabled()) {
+      await ensureOffscreenAndSchedule();
+    } else {
+      scheduleKeepAliveAlarm();
+    }
+  })();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void ensureOffscreenAndSchedule();
+  void (async () => {
+    if (await getPokeEnabled()) {
+      await ensureOffscreenAndSchedule();
+    } else {
+      scheduleKeepAliveAlarm();
+    }
+  })();
 });
 
-void ensureOffscreenAndSchedule();
+void (async () => {
+  if (await getPokeEnabled()) {
+    await ensureOffscreenAndSchedule();
+  } else {
+    scheduleKeepAliveAlarm();
+  }
+})();
 
 /** @type {Record<string, (message: unknown, sendResponse: (r: unknown) => void) => boolean | void>} */
 const RUNTIME_HANDLERS = {
@@ -1852,11 +1893,13 @@ const RUNTIME_HANDLERS = {
     const m = /** @type {{ token?: unknown }} */ (message);
     const token = typeof m.token === "string" ? m.token : "";
     void chrome.storage.local.set({ wsAuthToken: token }).then(async () => {
-      await ensureOffscreenAndSchedule();
-      try {
-        bridgePort?.postMessage({ type: "reconnect" });
-      } catch {
-        /* ignore */
+      if (await getPokeEnabled()) {
+        await ensureOffscreenAndSchedule();
+        try {
+          bridgePort?.postMessage({ type: "reconnect" });
+        } catch {
+          /* ignore */
+        }
       }
       sendResponse({ ok: true });
     });
@@ -1870,30 +1913,48 @@ const RUNTIME_HANDLERS = {
       return false;
     }
     void chrome.storage.local.set({ wsPort: next }).then(async () => {
-      await ensureOffscreenAndSchedule();
-      try {
-        bridgePort?.postMessage({ type: "reconnect", port: next });
-      } catch {
-        /* ignore */
+      if (await getPokeEnabled()) {
+        await ensureOffscreenAndSchedule();
+        try {
+          bridgePort?.postMessage({ type: "reconnect", port: next });
+        } catch {
+          /* ignore */
+        }
       }
       sendResponse({ ok: true, port: next });
     });
     return true;
   },
   POKE_RECONNECT: (_message, sendResponse) => {
-    void ensureOffscreenAndSchedule().then(() => {
-      try {
-        bridgePort?.postMessage({ type: "reconnect" });
-      } catch {
-        /* ignore */
+    void (async () => {
+      if (await getPokeEnabled()) {
+        await ensureOffscreenAndSchedule();
+        try {
+          bridgePort?.postMessage({ type: "reconnect" });
+        } catch {
+          /* ignore */
+        }
       }
       sendResponse({ ok: true });
-    });
+    })();
     return true;
   },
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message && typeof message === "object" && message.action === "setPokeBrowserEnabled") {
+    const enabled = message.enabled === true;
+    void (async () => {
+      await chrome.storage.local.set({ enabled });
+      if (enabled) {
+        await ensureOffscreenAndSchedule();
+      } else {
+        await stopMcpConnection();
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
   const t = message && typeof message === "object" && "type" in message ? String(message.type) : "";
   const fn = RUNTIME_HANDLERS[t];
   if (fn) return fn(message, sendResponse);

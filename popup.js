@@ -1,32 +1,15 @@
 const statusDot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
-const portInput = document.getElementById("port");
-const applyPort = document.getElementById("applyPort");
-const reconnectBtn = document.getElementById("reconnect");
-const tokenInput = document.getElementById("token");
-const applyToken = document.getElementById("applyToken");
-const logEl = document.getElementById("log");
+const portUrlEl = document.getElementById("portUrl");
+const mcpEnabled = document.getElementById("mcpEnabled");
+const versionEl = document.getElementById("version");
 
-function formatTime(ts) {
-  try {
-    return new Date(ts).toLocaleTimeString();
-  } catch {
-    return String(ts);
-  }
-}
+const DEFAULT_PORT = 9009;
 
-function renderLog(entries) {
-  if (!logEl) return;
-  if (!entries || entries.length === 0) {
-    logEl.textContent = "No events yet.";
-    return;
-  }
-  logEl.textContent = entries
-    .map((e) => {
-      const arrow = e.direction === "in" ? "←" : "→";
-      return `[${formatTime(e.ts)}] ${arrow} ${e.summary}`;
-    })
-    .join("\n");
+function normalizePort(value) {
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 0 && n < 65536) return Math.trunc(n);
+  return DEFAULT_PORT;
 }
 
 function applyStatus(status) {
@@ -44,52 +27,59 @@ function applyStatus(status) {
   }
 }
 
-async function refresh() {
-  const state = await chrome.runtime.sendMessage({ type: "POKE_GET_STATE" });
-  if (state && portInput) {
-    portInput.value = String(state.port ?? "");
-  }
-  if (state && tokenInput && typeof state.hasAuthToken === "boolean") {
-    tokenInput.placeholder = state.hasAuthToken ? "•••••• (saved — type to replace)" : "Paste token from MCP stderr";
-  }
-  if (state) {
-    applyStatus(state.status);
-    renderLog(state.log);
+function setPortDisplay(port) {
+  if (portUrlEl) {
+    portUrlEl.textContent = `ws://localhost:${port}`;
   }
 }
 
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg?.type === "POKE_STATUS" || msg?.type === "POKE_LOG_UPDATE") {
-    refresh();
-  }
-});
-
-applyPort?.addEventListener("click", async () => {
-  const raw = portInput?.value ?? "";
-  const port = Number(raw);
-  const res = await chrome.runtime.sendMessage({ type: "POKE_SET_PORT", port });
-  if (res && !res.ok) {
+async function syncFromBackgroundStatus() {
+  try {
+    const state = await chrome.runtime.sendMessage({ type: "POKE_GET_STATE" });
+    if (state && typeof state.status === "string") {
+      applyStatus(state.status);
+    }
+  } catch {
     applyStatus("disconnected");
-    if (logEl) logEl.textContent = res.error || "Invalid port";
-    return;
   }
-  await refresh();
-});
+}
 
-reconnectBtn?.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: "POKE_RECONNECT" });
-  await refresh();
-});
-
-applyToken?.addEventListener("click", async () => {
-  const token = tokenInput?.value ?? "";
-  const res = await chrome.runtime.sendMessage({ type: "POKE_SET_TOKEN", token });
-  if (res && !res.ok && logEl) {
-    logEl.textContent = "Could not save token.";
-    return;
+async function load() {
+  if (versionEl) {
+    versionEl.textContent = `v${chrome.runtime.getManifest().version}`;
   }
-  if (tokenInput) tokenInput.value = "";
-  await refresh();
+
+  const stored = await chrome.storage.local.get(["enabled", "port", "wsPort"]);
+  const port =
+    typeof stored.port === "number"
+      ? normalizePort(stored.port)
+      : normalizePort(stored.wsPort);
+  setPortDisplay(port);
+
+  const enabled = typeof stored.enabled === "boolean" ? stored.enabled : true;
+  if (mcpEnabled) mcpEnabled.checked = enabled;
+
+  await syncFromBackgroundStatus();
+}
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.type === "POKE_STATUS" && typeof msg.status === "string") {
+    applyStatus(msg.status);
+  }
+  if (msg?.type === "POKE_LOG_UPDATE") {
+    void syncFromBackgroundStatus();
+  }
 });
 
-refresh();
+mcpEnabled?.addEventListener("change", async () => {
+  const enabled = mcpEnabled.checked;
+  await chrome.storage.local.set({ enabled });
+  try {
+    await chrome.runtime.sendMessage({ action: "setPokeBrowserEnabled", enabled });
+  } catch {
+    /* extension invalidated */
+  }
+  await syncFromBackgroundStatus();
+});
+
+void load();

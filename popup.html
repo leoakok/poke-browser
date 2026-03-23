@@ -5,117 +5,243 @@
     <title>poke-browser</title>
     <style>
       :root {
-        color-scheme: light dark;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        font-size: 13px;
+        --bg: #0a0a0a;
+        --surface: #111;
+        --border: #222;
+        --text-primary: #fafafa;
+        --text-muted: #888;
+        --accent: #7c3aed;
+        --accent-muted: rgba(124, 58, 237, 0.35);
+        --error: #ef4444;
+        --connected: #22c55e;
+        --footer-mid: #555;
+        --footer-low: #444;
       }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
         margin: 0;
-        padding: 12px;
+        padding: 14px;
         width: 320px;
-        max-height: 420px;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+        background: var(--bg);
+        color: var(--text-primary);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .header {
         display: flex;
-        flex-direction: column;
-        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 14px;
       }
-      h1 {
+
+      .wordmark {
         font-size: 14px;
-        margin: 0;
         font-weight: 600;
+        color: var(--text-primary);
+        letter-spacing: -0.02em;
       }
-      .row {
+
+      .gh-link {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        color: var(--text-muted);
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+
+      .gh-link:hover {
+        color: var(--text-primary);
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .gh-link svg {
+        width: 18px;
+        height: 18px;
+        fill: currentColor;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+        margin-bottom: 12px;
+      }
+
+      .status-row {
         display: flex;
         align-items: center;
         gap: 8px;
-        flex-wrap: wrap;
+        margin-bottom: 8px;
       }
-      label {
-        min-width: 72px;
-        color: color-mix(in srgb, CanvasText 75%, transparent);
-      }
-      input[type="number"],
-      input[type="password"],
-      input[type="text"]#token {
-        padding: 4px 6px;
-      }
-      input[type="number"] {
-        width: 88px;
-      }
-      input#token {
-        flex: 1;
-        min-width: 0;
-      }
-      button {
-        padding: 4px 10px;
-        cursor: pointer;
-      }
-      .status {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-weight: 500;
-      }
+
       .dot {
         width: 8px;
         height: 8px;
         border-radius: 50%;
-        background: #888;
+        flex-shrink: 0;
+        background: var(--error);
+        box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
       }
+
       .dot.connected {
-        background: #2ecc71;
+        background: var(--connected);
+        box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.25);
       }
+
       .dot.connecting {
-        background: #f1c40f;
+        background: #eab308;
+        box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.3);
       }
-      .dot.disconnected {
-        background: #e74c3c;
+
+      #statusText {
+        font-weight: 500;
+        font-size: 13px;
+        color: var(--text-primary);
       }
-      #log {
-        border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas);
+
+      .port-url {
+        font-size: 12px;
+        color: var(--text-muted);
+        font-variant-numeric: tabular-nums;
+        word-break: break-all;
+      }
+
+      .toggle-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 14px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        margin-bottom: 14px;
+      }
+
+      .toggle-label {
+        font-size: 13px;
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+
+      .switch {
+        position: relative;
+        width: 40px;
+        height: 22px;
+        flex-shrink: 0;
+      }
+
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+        position: absolute;
+      }
+
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        inset: 0;
+        background: #3f3f46;
         border-radius: 6px;
-        padding: 8px;
-        flex: 1;
-        min-height: 160px;
-        max-height: 220px;
-        overflow: auto;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        font-size: 11px;
-        line-height: 1.35;
-        white-space: pre-wrap;
-        word-break: break-word;
+        transition: background 0.2s ease;
       }
-      .hint {
+
+      .slider::before {
+        content: "";
+        position: absolute;
+        height: 16px;
+        width: 16px;
+        left: 3px;
+        bottom: 3px;
+        background: #fafafa;
+        border-radius: 4px;
+        transition: transform 0.2s ease;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+      }
+
+      .switch input:checked + .slider {
+        background: var(--accent);
+      }
+
+      .switch input:checked + .slider::before {
+        transform: translateX(18px);
+      }
+
+      .switch input:focus-visible + .slider {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .footer {
+        text-align: center;
+        padding-top: 4px;
+      }
+
+      .version {
         font-size: 11px;
-        color: color-mix(in srgb, CanvasText 65%, transparent);
-        line-height: 1.4;
+        color: var(--footer-mid);
+        margin-bottom: 4px;
+      }
+
+      .credit {
+        font-size: 10px;
+        color: var(--footer-low);
       }
     </style>
   </head>
   <body>
-    <h1>poke-browser</h1>
-    <div class="row">
-      <span class="status" id="statusRow">
-        <span class="dot disconnected" id="statusDot"></span>
+    <header class="header">
+      <span class="wordmark">poke-browser</span>
+      <a
+        class="gh-link"
+        href="https://github.com/leoakok/poke-browser"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="GitHub"
+        aria-label="poke-browser on GitHub"
+      >
+        <svg viewBox="0 0 98 96" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path
+            fill-rule="evenodd"
+            clip-rule="evenodd"
+            d="M48.854 0C21.839 0 0 22 0 49.217c0 21.756 13.993 40.172 33.405 46.69 2.427.49 3.316-1.059 3.316-2.362 0-1.141-.08-5.052-.08-9.127-13.59 2.934-16.42-5.867-16.42-5.867-2.184-5.704-5.42-7.17-5.42-7.17-4.448-3.015.324-3.015.324-3.015 4.934.326 7.523 5.052 7.523 5.052 4.367 7.496 11.404 5.378 14.235 4.074.404-3.178 1.699-5.378 3.074-6.6-10.839-1.141-22.243-5.378-22.243-24.283 0-5.378 1.94-9.778 5.014-13.2-.485-1.222-2.184-6.275.486-13.038 0 0 4.125-1.304 13.426 5.052a46.97 46.97 0 0 1 12.214-1.63c4.125 0 8.33.571 12.213 1.63 9.302-6.356 13.427-5.052 13.427-5.052 2.67 6.763.97 11.816.485 13.038 3.155 3.422 5.015 7.822 5.015 13.2 0 18.905-11.404 23.06-22.324 24.283 1.78 1.548 3.316 4.481 3.316 9.126 0 6.6-.08 11.897-.08 13.526 0 1.304.89 2.853 3.316 2.364 19.412-6.52 33.405-24.935 33.405-46.691C97.707 22 75.788 0 48.854 0z"
+          />
+        </svg>
+      </a>
+    </header>
+
+    <section class="card" aria-live="polite">
+      <div class="status-row">
+        <span class="dot disconnected" id="statusDot" aria-hidden="true"></span>
         <span id="statusText">Disconnected</span>
-      </span>
+      </div>
+      <div class="port-url" id="portUrl">ws://localhost:9009</div>
+    </section>
+
+    <div class="toggle-row">
+      <span class="toggle-label" id="toggleLabel">MCP Connection</span>
+      <label class="switch" title="Enable MCP WebSocket bridge">
+        <input type="checkbox" id="mcpEnabled" checked />
+        <span class="slider"></span>
+      </label>
     </div>
-    <div class="row">
-      <label for="port">WS port</label>
-      <input id="port" type="number" min="1" max="65535" />
-      <button type="button" id="applyPort">Apply</button>
-      <button type="button" id="reconnect">Reconnect</button>
-    </div>
-    <div class="row">
-      <label for="token">Auth token</label>
-      <input id="token" type="password" autocomplete="off" placeholder="Paste token from MCP stderr" />
-      <button type="button" id="applyToken">Save</button>
-    </div>
-    <div class="hint">
-      MCP server listens on this port and prints a WebSocket auth token to stderr. Paste it here (must match
-      <code>POKE_BROWSER_TOKEN</code> if you set that env var).
-    </div>
-    <div style="font-weight: 600">Recent activity</div>
-    <div id="log"></div>
+
+    <footer class="footer">
+      <div class="version" id="version"></div>
+      <div class="credit">Built by Poke x Leo</div>
+    </footer>
+
     <script src="popup.js"></script>
   </body>
 </html>
