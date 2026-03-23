@@ -3,6 +3,11 @@
  * Launcher for poke-browser MCP (same Poke auth + tunnel pattern as @leokok/poke-apple-music).
  * Auth: `npx poke@latest whoami` / `poke login` — not POKE_API_KEY.
  * Tunnel: `npx poke@latest tunnel <local /mcp URL> -n "<label>"` (stdio inherit).
+ *
+ * Mode selection (first match wins):
+ *   1. stdin is a pipe (not TTY)  → stdio MCP mode (Cursor, Claude Desktop, etc.)
+ *   2. --http or --stdio flag     → explicit HTTP / stdio mode
+ *   3. everything else            → poke-tunnel mode (interactive terminal)
  */
 import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -172,19 +177,19 @@ function printQuietStartupBanner({
   console.error("");
   console.error("  2. Enable Developer Mode");
   console.error("");
-  console.error("  3. Click Load unpacked → select the /extension folder");
+  console.error("  3. Click Load unpacked \u2192 select the /extension folder");
   console.error(
     color.grey(
-      "     (NOT the root — open poke-browser/extension specifically)",
+      "     (NOT the root \u2014 open poke-browser/extension specifically)",
     ),
   );
   console.error(color.dim(`     ${extPath}`));
   console.error("");
   console.error("  4. Extension auto-connects to this server");
   console.error("");
-  console.error("  ★ Star us: https://github.com/leoakok/poke-browser");
+  console.error("  \u2605 Star us: https://github.com/leoakok/poke-browser");
   console.error("");
-  console.error("  ─────────────────────────────────────");
+  console.error("  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500");
   if (showMcpLine) {
     console.error(
       `  Local MCP:  http://127.0.0.1:${mcpPort}/mcp${mcpAuto}`,
@@ -205,19 +210,25 @@ function childEnv() {
 }
 
 if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
-  console.error(`@leokok/poke-browser — MCP server for the poke-browser Chrome extension
+  console.error(`@leokok/poke-browser \u2014 MCP server for the poke-browser Chrome extension
 
 Usage:
-  poke-browser                    MCP over stdio (default; Cursor, Claude Desktop, etc.)
-  poke-browser --poke-tunnel      HTTP MCP + Poke tunnel (same auth/tunnel pattern as poke-apple-music)
+  poke-browser                    Poke tunnel mode when run in a terminal (default)
+  poke-browser --poke-tunnel      Same as above (explicit)
+  poke-browser --stdio            Force stdio MCP mode (Cursor, Claude Desktop, etc.)
   poke-browser --http [port]      Streamable HTTP MCP on 127.0.0.1 (default: env POKE_BROWSER_MCP_PORT or 8755)
-  poke-browser --tunnel [port]    Same as --http, then: npx poke@latest tunnel …/mcp
-  poke-browser --name <label>     Poke tunnel -n label and MCP server id — implies --poke-tunnel
+  poke-browser --tunnel [port]    Same as --http, then: npx poke@latest tunnel \u2026/mcp
+  poke-browser --name <label>     Poke tunnel -n label and MCP server id
   poke-browser --debug            Verbose stderr ([poke-browser], WebSocket port, MCP debug)
   poke-browser --verbose          Same as --debug
 
+Mode selection (first match wins):
+  - stdin is NOT a TTY (piped)    \u2192 stdio mode  (Cursor / Claude Desktop auto-detection)
+  - --http or --stdio flag        \u2192 explicit HTTP / stdio mode
+  - interactive terminal          \u2192 poke-tunnel mode (shows public URL)
+
 Poke auth (tunnel flows):
-  Uses the global Poke CLI — same as @leokok/poke-apple-music:
+  Uses the global Poke CLI \u2014 same as @leokok/poke-apple-music:
     npx poke@latest whoami    # must succeed before tunnel
     npx poke@latest login     # browser login if needed
   Optional: POKE_BROWSER_SKIP_POKE_LOGIN=1 to skip the whoami/login gate.
@@ -242,8 +253,25 @@ if (rawArgs.includes("--version") || rawArgs.includes("-v")) {
 
 const wantBuild = rawArgs.includes("--build");
 
-// --name implies the poke-tunnel flow: the user wants a public tunnel with a custom label.
+/**
+ * Tunnel mode is active when ANY of:
+ *   1. npm run start:tunnel lifecycle
+ *   2. explicit --poke-tunnel flag
+ *   3. --name flag (custom label implies tunnel intent)
+ *   4. stdin is an interactive TTY AND no explicit --http / --stdio / pipe mode
+ *
+ * stdio mode (for Cursor / Claude Desktop) is used when:
+ *   - stdin is NOT a TTY (process is spawned with a pipe), OR
+ *   - --stdio flag is explicitly passed, OR
+ *   - --http flag is explicitly passed
+ */
+const wantStdioMode =
+  !input.isTTY ||
+  rawArgs.includes("--stdio") ||
+  rawArgs.includes("--http");
+
 const wantPokeTunnelFlow =
+  !wantStdioMode ||
   process.env.npm_lifecycle_event === "start:tunnel" ||
   rawArgs.includes("--poke-tunnel") ||
   !!customMcpName;
@@ -252,6 +280,7 @@ const childArgs = rawArgs.filter((a, i, arr) => {
   if (
     a === "--build" ||
     a === "--poke-tunnel" ||
+    a === "--stdio" ||
     a === "--debug" ||
     a === "--verbose" ||
     a === "--name"
@@ -375,7 +404,7 @@ if (!existsSync(entry)) {
       const current = pkg.version;
       if (latest && latest !== current) {
         console.log(
-          "\x1b[33m  ⚡ Update available: v" +
+          "\x1b[33m  \u26a1 Update available: v" +
             latest +
             " (you have v" +
             current +
@@ -394,7 +423,7 @@ if (!existsSync(entry)) {
     if (!ensurePokeLoginForTunnel()) {
       process.exit(1);
     }
-    console.error(color.green("  Signed in to Poke — starting HTTP MCP and tunnel."));
+    console.error(color.green("  Signed in to Poke \u2014 starting HTTP MCP and tunnel."));
     console.error(
       color.dim("  Poke can use poke-browser while this window stays open."),
     );
@@ -414,6 +443,7 @@ if (!existsSync(entry)) {
     process.exit(r.status ?? 1);
   }
 
+  // stdio mode: Cursor / Claude Desktop (stdin is a pipe)
   const r = spawnSync(process.execPath, [entry, ...resolvedChildArgs], {
     stdio: "inherit",
     env: envWithPorts,
