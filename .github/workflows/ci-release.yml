@@ -76,11 +76,6 @@ jobs:
         working-directory: mcp-server
         run: npm run build
 
-      - name: Sync extension manifest version
-        working-directory: mcp-server
-        run: |
-          node -e "const fs=require('fs');const p=require('./package.json');const m=JSON.parse(fs.readFileSync('../extension/manifest.json','utf8'));m.version=String(p.version).replace(/^v/,'');fs.writeFileSync('../extension/manifest.json',JSON.stringify(m,null,2)+'\n');"
-
       - name: Semantic release
         working-directory: mcp-server
         env:

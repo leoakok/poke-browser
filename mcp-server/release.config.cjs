@@ -8,6 +8,13 @@ module.exports = {
     "@semantic-release/release-notes-generator",
     "@semantic-release/changelog",
     "@semantic-release/npm",
+    [
+      "@semantic-release/exec",
+      {
+        prepareCmd:
+          "node -e \"const fs=require('fs');const path='../extension/manifest.json';const m=JSON.parse(fs.readFileSync(path,'utf8'));m.version='${nextRelease.version}'.replace(/^v/,'');fs.writeFileSync(path,JSON.stringify(m,null,2)+'\\\\n');\"",
+      },
+    ],
     "@semantic-release/github",
     [
       "@semantic-release/git",

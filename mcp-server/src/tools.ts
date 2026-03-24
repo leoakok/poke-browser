@@ -231,9 +231,21 @@ Do not stop at the wall—drive the verification control explicitly.
 
 /** Flat ZodObject (required `action`) so MCP tools/list JSON Schema includes `required: ["action"]`. */
 const ManageTabsSchema = z.object({
-  action: z.enum(["list", "get_active", "new", "close", "switch"]),
-  tabId: z.number().optional(),
-  url: z.string().optional(),
+  action: z
+    .enum(["list", "get_active", "new", "close", "switch"])
+    .describe(
+      "Tab operation to perform. Use list/get_active for discovery, new to open a tab, and close/switch with tabId."
+    ),
+  tabId: z
+    .number()
+    .int()
+    .positive()
+    .optional()
+    .describe("Required for close and switch. Ignored for list/get_active/new."),
+  url: z
+    .string()
+    .optional()
+    .describe("Optional URL for action=new. If omitted, Chrome opens a blank new tab."),
 });
 
 export function registerTools(mcp: McpServer): void {
@@ -241,7 +253,7 @@ export function registerTools(mcp: McpServer): void {
     "browser_guide",
     {
       description:
-        "Return a static Markdown playbook: all tools (one line each), snapshot-then-act clicking, Cloudflare/human-verify flows, common errors, and execute_script vs evaluate_js / CSP notes. No parameters.",
+        "Return the built-in Markdown playbook for this MCP server. Use when you need workflow guidance, tool ordering, or troubleshooting notes. No parameters.",
       inputSchema: {},
     },
     async () => {
@@ -254,14 +266,19 @@ export function registerTools(mcp: McpServer): void {
     "navigate_to",
     {
       description:
-        "Navigate a tab to a URL (defaults to the active tab). Always waits for chrome.tabs status complete (via onUpdated) before returning tabId, url, and title. waitForLoad false uses a 10s load timeout; omitted/true uses 30s.",
+        "Navigate a browser tab to a URL and wait for load completion. Use this before interacting with a new page. Prefer this over managetabs(new) when you want deterministic 'loaded' state in the result.",
       inputSchema: {
-        url: z.string().min(1).describe("Destination URL"),
-        tabId: tabIdSchema.optional().describe("Optional tab id; defaults to active tab"),
+        url: z
+          .string()
+          .min(1)
+          .describe("Absolute destination URL to open, for example https://x.com/home."),
+        tabId: tabIdSchema
+          .optional()
+          .describe("Optional target tab id. If omitted, navigates the current active tab."),
         waitForLoad: z
           .boolean()
           .optional()
-          .describe("If false, use a shorter (10s) load wait timeout; if true/omitted, up to ~30s"),
+          .describe("If false, use shorter wait (about 10s). If true/omitted, wait up to about 30s."),
       },
     },
     async ({ url, tabId, waitForLoad }) =>
@@ -272,16 +289,16 @@ export function registerTools(mcp: McpServer): void {
     "click_element",
     {
       description:
-        "Click via CSS selector / XPath (content script) or viewport coordinates (Chrome DevTools Protocol). Provide either selector or x+y. Always performs CDP Input.dispatchMouseEvent mouseMoved at the target point, waits 1s, then clicks so hover-dependent UI can render. After clicking, it is highly recommended to inspect the DOM (e.g., using get_dom_snapshot) to detect any new modals or UI changes that may have appeared.",
+        "Click an element by selector or viewport coordinates. Use selector when available; use x+y when you already resolved bounds from find_element/get_dom_snapshot. Performs hover first, then click, to support hover-activated UI. After each click, re-inspect the page before the next action.",
       inputSchema: {
         selector: z
           .string()
           .min(1)
           .optional()
-          .describe("CSS selector, '//xpath', or 'xpath:expr'"),
-        x: z.number().optional().describe("Viewport X when using coordinate click (debugger)"),
-        y: z.number().optional().describe("Viewport Y when using coordinate click (debugger)"),
-        tabId: tabIdSchema.optional(),
+          .describe("CSS selector, //xpath, or xpath:expr. Provide this OR x+y."),
+        x: z.number().optional().describe("Viewport X coordinate for CDP click. Requires y."),
+        y: z.number().optional().describe("Viewport Y coordinate for CDP click. Requires x."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async (args) => handleClickElementTool(args)
@@ -291,19 +308,29 @@ export function registerTools(mcp: McpServer): void {
     "type_text",
     {
       description:
-        "Type into an input, textarea, or contenteditable (selector optional; uses focused element if omitted). When clear is true (default), the extension selects all and deletes existing content before typing (content script or CDP key events on fallback). Set clear false to append without clearing.",
+        "Type text into input, textarea, or contenteditable. Prefer this over execute_script/evaluate_js for user-like editing. If selector is omitted, the currently focused element is used.",
       inputSchema: {
-        text: z.string().describe("Text to type"),
-        selector: z.string().min(1).optional(),
-        x: z.number().optional().describe("Optional viewport X — shows brief cursor feedback dot in the tab"),
-        y: z.number().optional().describe("Optional viewport Y — shows brief cursor feedback dot in the tab"),
-        tabId: tabIdSchema.optional(),
+        text: z
+          .string()
+          .describe("Exact text to type. Supports newlines. Empty string is allowed but usually unnecessary."),
+        selector: z
+          .string()
+          .min(1)
+          .optional()
+          .describe("Target field selector (CSS/XPath). If omitted, types into focused element."),
+        x: z
+          .number()
+          .optional()
+          .describe("Optional viewport X for visual cursor feedback only; does not choose element."),
+        y: z
+          .number()
+          .optional()
+          .describe("Optional viewport Y for visual cursor feedback only; does not choose element."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
         clear: z
           .boolean()
           .optional()
-          .describe(
-            "If true (default), select-all and delete existing content before typing"
-          ),
+          .describe("If true (default), clear existing content first. If false, append/insert at caret."),
       },
     },
     async ({ text, selector, x, y, tabId, clear }) =>
@@ -321,23 +348,23 @@ export function registerTools(mcp: McpServer): void {
     "scroll_window",
     {
       description:
-        "Scroll the target tab's main frame (via injected main-world script). Use selector to scroll an element into view; x/y for absolute scroll position; deltaX/deltaY for relative scroll; or direction (up/down/left/right) with optional amount (pixels, default ~85% of viewport). Precedence: selector, then absolute x/y, then direction+deltas, then deltaX/deltaY alone.",
+        "Scroll the page using one of four modes: selector into view, absolute position, directional step, or delta offsets. Use this when content is offscreen before click/type.",
       inputSchema: {
-        x: z.number().optional().describe("Absolute scrollLeft"),
-        y: z.number().optional().describe("Absolute scrollTop"),
-        deltaX: z.number().optional().describe("Horizontal scroll delta (used alone or as fallback amount with direction)"),
-        deltaY: z.number().optional().describe("Vertical scroll delta (used alone or as fallback amount with direction)"),
+        x: z.number().optional().describe("Absolute scrollLeft. Used when x or y is provided."),
+        y: z.number().optional().describe("Absolute scrollTop. Used when x or y is provided."),
+        deltaX: z.number().optional().describe("Horizontal scroll delta in pixels."),
+        deltaY: z.number().optional().describe("Vertical scroll delta in pixels."),
         direction: z
           .enum(["up", "down", "left", "right"])
           .optional()
-          .describe("Scroll in this direction; combine with amount or non-zero delta on that axis"),
+          .describe("Directional scroll mode. Use with amount for deterministic movement."),
         amount: z
           .number()
           .optional()
-          .describe("Distance in pixels when using direction (default ~85% of viewport height or width)"),
-        selector: z.string().min(1).optional().describe("Element to scroll into view"),
-        tabId: tabIdSchema.optional(),
-        behavior: z.enum(["smooth", "instant"]).optional().describe("Scroll behavior (default instant)"),
+          .describe("Pixels to scroll in directional mode. Default is about 85% of viewport."),
+        selector: z.string().min(1).optional().describe("Element selector to scroll into view (highest precedence)."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
+        behavior: z.enum(["smooth", "instant"]).optional().describe("Scroll animation behavior. Default instant."),
       },
     },
     async (args) => callTool("scroll_window", args)
@@ -347,19 +374,19 @@ export function registerTools(mcp: McpServer): void {
     "capture_screenshot",
     {
       description:
-        "Capture the visible area of a browser tab as an image (PNG or JPEG). Defaults to the active tab. May activate the target tab briefly to capture it.",
+        "Capture a viewport screenshot of the current page. Use for visual verification, debugging, and coordinate-based actions.",
       inputSchema: {
-        tabId: tabIdSchema.optional().describe("Tab to capture; defaults to the active tab in the focused window"),
+        tabId: tabIdSchema.optional().describe("Tab to capture. Defaults to active tab in focused window."),
         format: z
           .enum(["png", "jpeg"])
           .optional()
-          .describe("Image format (default png). JPEG supports quality."),
+          .describe("Output image format. Default png."),
         quality: z
           .number()
           .min(0)
           .max(100)
           .optional()
-          .describe("JPEG quality 0–100 (only used when format is jpeg)"),
+          .describe("JPEG quality 0-100; ignored unless format=jpeg."),
       },
     },
     async ({ tabId, format, quality }): Promise<CallToolResult> => {
@@ -409,24 +436,24 @@ export function registerTools(mcp: McpServer): void {
     "capture_and_upload_screenshot",
     {
       description:
-        "Capture the visible tab (same as capture_screenshot) and POST it as multipart/form-data to an upload URL. On success returns mediaId and url from JSON. On failure (missing URL, network error, non-OK response, or unparseable JSON) returns base64 plus a temp file path. Defaults uploadUrl to env POKE_UPLOAD_URL.",
+        "Capture a viewport screenshot and upload it via multipart/form-data. Use when downstream systems need a hosted image URL. Falls back to base64 + local temp file when upload is unavailable or fails.",
       inputSchema: {
-        tabId: tabIdSchema.optional().describe("Tab to capture; defaults to the active tab in the focused window"),
+        tabId: tabIdSchema.optional().describe("Tab to capture. Defaults to active tab in focused window."),
         format: z
           .enum(["png", "jpeg"])
           .optional()
-          .describe("Image format (default png). JPEG supports quality."),
+          .describe("Output image format. Default png."),
         quality: z
           .number()
           .min(0)
           .max(100)
           .optional()
-          .describe("JPEG quality 0–100 (only used when format is jpeg)"),
+          .describe("JPEG quality 0-100; ignored unless format=jpeg."),
         uploadUrl: z
           .string()
           .min(1)
           .optional()
-          .describe("POST endpoint for multipart upload; defaults to POKE_UPLOAD_URL when set"),
+          .describe("Upload endpoint URL. If omitted, uses env POKE_UPLOAD_URL when configured."),
       },
     },
     async ({ tabId, format, quality, uploadUrl }): Promise<CallToolResult> => {
@@ -495,11 +522,11 @@ export function registerTools(mcp: McpServer): void {
     "full_page_capture",
     {
       description:
-        "Capture a full-page screenshot by scrolling the viewport and stitching strips (OffscreenCanvas). Slower than capture_screenshot; may duplicate fixed headers between strips.",
+        "Capture a stitched full-page screenshot by scrolling and combining strips. Use when viewport screenshot is insufficient. Slower than capture_screenshot and may duplicate sticky/fixed UI.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
-        format: z.enum(["png", "jpeg"]).optional(),
-        quality: z.number().min(0).max(100).optional().describe("JPEG quality when format is jpeg"),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
+        format: z.enum(["png", "jpeg"]).optional().describe("Output image format. Default png."),
+        quality: z.number().min(0).max(100).optional().describe("JPEG quality 0-100; only for format=jpeg."),
       },
     },
     async ({ tabId, format, quality }): Promise<CallToolResult> => {
@@ -549,11 +576,11 @@ export function registerTools(mcp: McpServer): void {
     "pdf_export",
     {
       description:
-        "Export the current page as PDF via CDP Page.printToPDF (printBackground true). Returns base64-encoded PDF data.",
+        "Export the page to PDF using CDP Page.printToPDF. Use for printable artifacts instead of screenshots.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
-        landscape: z.boolean().optional(),
-        scale: z.number().positive().max(2).optional().describe("Scale factor (default 1)"),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
+        landscape: z.boolean().optional().describe("Render PDF in landscape orientation when true."),
+        scale: z.number().positive().max(2).optional().describe("Print scale factor. Default 1."),
       },
     },
     async ({ tabId, landscape, scale }) =>
@@ -564,14 +591,14 @@ export function registerTools(mcp: McpServer): void {
     "device_emulate",
     {
       description:
-        "Apply CDP device metrics and optional user-agent override (mobile/tablet/desktop presets). Debugger attaches briefly; viewport may reset when the session detaches.",
+        "Emulate device viewport metrics (mobile/tablet/desktop) and optional user-agent override. Use before responsive layout checks or device-specific flows.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
-        device: z.enum(["mobile", "tablet", "desktop"]).optional().describe("Preset (default desktop)"),
-        width: z.number().int().positive().optional(),
-        height: z.number().int().positive().optional(),
-        deviceScaleFactor: z.number().positive().optional(),
-        userAgent: z.string().optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
+        device: z.enum(["mobile", "tablet", "desktop"]).optional().describe("Preset metrics profile. Default desktop."),
+        width: z.number().int().positive().optional().describe("Override viewport width in CSS pixels."),
+        height: z.number().int().positive().optional().describe("Override viewport height in CSS pixels."),
+        deviceScaleFactor: z.number().positive().optional().describe("Override pixel ratio / device scale factor."),
+        userAgent: z.string().optional().describe("Optional user-agent override string."),
       },
     },
     async ({ tabId, device, width, height, deviceScaleFactor, userAgent }) =>
@@ -582,7 +609,7 @@ export function registerTools(mcp: McpServer): void {
     "managetabs",
     {
       description:
-        "List tabs, read the active tab, open, close, or switch tabs in the connected Chrome profile.",
+        "Manage browser tabs: list, get active, open, close, or switch. Use this for tab orchestration; use navigate_to for load-aware URL navigation.",
       inputSchema: ManageTabsSchema,
     },
     async (args): Promise<CallToolResult> => {
@@ -621,17 +648,18 @@ export function registerTools(mcp: McpServer): void {
   mcp.registerTool(
     "evaluate_js",
     {
-      description: "Evaluate JavaScript in the page's main world (via content-script relay)",
+      description:
+        "Evaluate JavaScript in the page context via content-script relay. Use for lightweight reads/computations. Prefer dedicated tools (find_element, click_element, type_text) for interactions.",
       inputSchema: {
-        code: z.string().min(1).describe("JavaScript source to evaluate"),
-        tabId: tabIdSchema.optional(),
+        code: z.string().min(1).describe("JavaScript expression or statement block to run in page context."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
         timeoutMs: z
           .number()
           .int()
           .positive()
           .max(120_000)
           .optional()
-          .describe("Optional timeout in ms (default 30000 in extension)"),
+          .describe("Execution timeout in milliseconds. Use higher values for heavy page scripts."),
       },
     },
     async ({ code, tabId, timeoutMs }) =>
@@ -642,7 +670,7 @@ export function registerTools(mcp: McpServer): void {
     "get_dom_snapshot",
     {
       description:
-        "Capture a compact DOM tree from the active (or chosen) tab: tags, ids, classes, roles, aria-label, short text, bounding rects, interactivity, and children up to maxDepth.",
+        "Return a compact DOM tree snapshot with structure, text, roles, bounds, and interactivity hints. Use for broad page understanding and multi-step planning.",
       inputSchema: {
         tabId: tabIdSchema.optional().describe("Tab to read; defaults to active tab in focused window"),
         includeHidden: z
@@ -666,9 +694,9 @@ export function registerTools(mcp: McpServer): void {
     "get_accessibility_tree",
     {
       description:
-        "Flat list of semantic nodes (roles, names, selectors, heading levels, form state) in reading order (top-to-bottom, left-to-right).",
+        "Return a flattened accessibility-oriented view: role/name/selector/state in reading order. Use when semantic targeting is more reliable than raw DOM shape.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
         interactiveOnly: z
           .boolean()
           .optional()
@@ -683,14 +711,17 @@ export function registerTools(mcp: McpServer): void {
     "find_element",
     {
       description:
-        "Find up to 5 elements by CSS selector, visible text, ARIA/title/alt, or XPath. Strategy auto tries css, then text, then aria. Prefer this over raw coordinates — always get bounding rect first, then compute center. TIP: When you need to look up multiple elements, prefer calling get_dom_snapshot once and searching within that result — it is more efficient than multiple find_element round-trips.",
+        "Find up to 5 matching elements by CSS, text, ARIA-like attributes, or XPath. Use this before click/type to obtain robust selectors and bounds. Prefer this over guessing coordinates.",
       inputSchema: {
-        query: z.string().min(1).describe("Selector string, text snippet, aria substring, or XPath expression"),
-        tabId: tabIdSchema.optional(),
+        query: z
+          .string()
+          .min(1)
+          .describe("Search query: selector, visible text snippet, aria/title/alt text, or xpath expression."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
         strategy: z
           .enum(["auto", "css", "text", "aria", "xpath"])
           .optional()
-          .describe("Matching strategy (default auto)"),
+          .describe("Matching strategy. auto tries css -> text -> aria."),
       },
     },
     async ({ query, tabId, strategy }) =>
@@ -701,13 +732,13 @@ export function registerTools(mcp: McpServer): void {
     "read_page",
     {
       description:
-        "Extract page content as structured data (default), plain text, or lightweight markdown (headings, links, lists, code). Skips script/style/nav/header/footer noise.",
+        "Extract readable page content as structured JSON, plain text, or lightweight markdown. Use this for content understanding rather than interaction.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
         format: z
           .enum(["markdown", "text", "structured"])
           .optional()
-          .describe("structured (default), text, or markdown"),
+          .describe("Output format: structured (default), text, or markdown."),
       },
     },
     async ({ tabId, format }) =>
@@ -718,25 +749,25 @@ export function registerTools(mcp: McpServer): void {
     "wait_for_selector",
     {
       description:
-        "Poll every 100ms until a CSS selector or XPath matches in the page (content script). Optional strict visibility checks.",
+        "Wait until an element exists (and optionally is visible). Use after actions that trigger async rendering, route changes, or delayed widgets.",
       inputSchema: {
         selector: z
           .string()
           .min(1)
           .describe("CSS selector, '//xpath', or 'xpath:expr' (same as find_element)"),
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
         timeout: z
           .number()
           .int()
           .positive()
           .max(120_000)
           .optional()
-          .describe("Max wait in ms (default 10000)"),
+          .describe("Maximum wait in milliseconds. Default 10000."),
         visible: z
           .boolean()
           .optional()
           .describe(
-            "If true, require visible layout (offsetParent / fixed-sticky rules) and not display:none, visibility:hidden, or opacity:0"
+            "If true, require element to be visually present (not display:none, hidden, or fully transparent)."
           ),
       },
     },
@@ -750,11 +781,11 @@ export function registerTools(mcp: McpServer): void {
     "execute_script",
     {
       description:
-        "Run an async script in the page main world via chrome.scripting. The script body is wrapped so `await` works; `args` is available as `args`. Result is JSON-clone-safe (circular refs become \"[Circular]\").",
+        "Execute async JavaScript via chrome.scripting with extension privileges. Use when evaluate_js is blocked by page constraints or you need script arguments/results in one call.",
       inputSchema: {
-        script: z.string().min(1).describe("JavaScript source body executed as async IIFE"),
-        tabId: tabIdSchema.optional(),
-        args: z.array(z.unknown()).optional().describe("Array available inside the script as `args`"),
+        script: z.string().min(1).describe("JavaScript function body executed as an async IIFE."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
+        args: z.array(z.unknown()).optional().describe("Arguments array exposed inside the script as `args`."),
       },
     },
     async ({ script, tabId, args }) =>
@@ -765,9 +796,9 @@ export function registerTools(mcp: McpServer): void {
     "error_reporter",
     {
       description:
-        "Return the last N uncaught page errors and unhandled promise rejections (separate from console logs): message, stack, filename, line/column, timestamp.",
+        "Return uncaught errors and unhandled promise rejections from the page context. Use this to diagnose runtime failures after interactions.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
         limit: z.number().int().positive().max(200).optional().describe("Max entries (default 50)"),
       },
     },
@@ -778,9 +809,9 @@ export function registerTools(mcp: McpServer): void {
     "get_performance_metrics",
     {
       description:
-        "Navigation timing (domContentLoaded, loadEventEnd), paint timings (firstPaint, firstContentfulPaint), and JS heap from CDP Performance.getMetrics (requires debugger attach briefly).",
+        "Return performance metrics (navigation timings, paint timings, JS heap) via CDP. Use for quick perf triage without full profiling.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async ({ tabId }) => callTool("get_performance_metrics", { tabId }, EVALUATE_JS_TIMEOUT_MS)
@@ -790,9 +821,9 @@ export function registerTools(mcp: McpServer): void {
     "get_console_logs",
     {
       description:
-        "Read console entries captured by the content script ring buffer (max 500). Requires the page to have loaded the poke-browser content script.",
+        "Read buffered console logs captured by the content script. Use for debugging page behavior and script errors.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
         level: z.enum(["all", "error", "warn", "info", "log"]).optional().describe("Filter (default all)"),
         limit: z.number().int().positive().max(500).optional().describe("Max entries (default 100)"),
       },
@@ -804,9 +835,9 @@ export function registerTools(mcp: McpServer): void {
   mcp.registerTool(
     "clear_console_logs",
     {
-      description: "Clear the tab's console capture ring buffer in the content script.",
+      description: "Clear buffered console logs for a tab.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async ({ tabId }) => callTool("clear_console_logs", { tabId })
@@ -816,9 +847,9 @@ export function registerTools(mcp: McpServer): void {
     "start_network_capture",
     {
       description:
-        "Enable CDP Network.* events for a tab and clear its prior in-memory network buffer (max 200 requests per tab).",
+        "Start capturing network traffic for a tab and reset its in-memory buffer. Call this before reproducing a request flow you want to inspect.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async ({ tabId }) => callTool("start_network_capture", { tabId })
@@ -827,9 +858,9 @@ export function registerTools(mcp: McpServer): void {
   mcp.registerTool(
     "stop_network_capture",
     {
-      description: "Detach CDP from the tab when it was attached only for network capture (stops new events).",
+      description: "Stop network capture for a tab (no new network events recorded).",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async ({ tabId }) => callTool("stop_network_capture", { tabId })
@@ -839,12 +870,12 @@ export function registerTools(mcp: McpServer): void {
     "get_network_logs",
     {
       description:
-        "Return buffered network requests for a tab. Optionally include response bodies (Network.getResponseBody). Use start_network_capture first to record new traffic.",
+        "Return buffered network requests for a tab. Optionally include response bodies. Use start_network_capture first to collect fresh traffic.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
-        filter: z.string().optional().describe("Substring filter on URL"),
-        limit: z.number().int().positive().max(200).optional().describe("Max entries (default 50)"),
-        includeBody: z.boolean().optional().describe("Fetch bodies for completed requests (slower)"),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
+        filter: z.string().optional().describe("Optional substring filter applied to request URL."),
+        limit: z.number().int().positive().max(200).optional().describe("Maximum entries to return. Default 50."),
+        includeBody: z.boolean().optional().describe("Include response bodies for completed requests. Slower."),
       },
     },
     async ({ tabId, filter, limit, includeBody }) =>
@@ -863,9 +894,9 @@ export function registerTools(mcp: McpServer): void {
   mcp.registerTool(
     "clear_network_logs",
     {
-      description: "Clear in-memory network request buffer for a tab.",
+      description: "Clear buffered network logs for a tab.",
       inputSchema: {
-        tabId: tabIdSchema.optional(),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async ({ tabId }) => callTool("clear_network_logs", { tabId })
@@ -875,36 +906,39 @@ export function registerTools(mcp: McpServer): void {
     "hover_element",
     {
       description:
-        "Hover using a selector (content script: mousemove/mouseover/mouseenter at element center) or viewport coordinates (CDP mouseMoved).",
+        "Hover over an element by selector or coordinates. Use to reveal hover menus/tooltips before clicking.",
       inputSchema: {
-        selector: z.string().min(1).optional(),
-        x: z.number().optional(),
-        y: z.number().optional(),
-        tabId: tabIdSchema.optional(),
+        selector: z.string().min(1).optional().describe("Target selector (CSS/XPath). Provide this OR x+y."),
+        x: z.number().optional().describe("Viewport X coordinate for CDP hover. Requires y."),
+        y: z.number().optional().describe("Viewport Y coordinate for CDP hover. Requires x."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async ({ selector, x, y, tabId }) => callTool("hover_element", { selector, x, y, tabId })
   );
 
   const fillFormFieldSchema = z.object({
-    selector: z.string().min(1),
-    value: z.string(),
-    type: z.enum(["text", "select", "checkbox", "radio", "file"]).optional(),
+    selector: z.string().min(1).describe("Field selector (CSS/XPath)."),
+    value: z.string().describe("Value to apply to the matched field."),
+    type: z
+      .enum(["text", "select", "checkbox", "radio", "file"])
+      .optional()
+      .describe("Optional field type hint. Usually inferred automatically."),
   });
 
   mcp.registerTool(
     "script_inject",
     {
       description:
-        "Inject a `<script>` into the page DOM (main world), unlike evaluate_js/execute_script isolated worlds. Optional persistent registration survives navigations on the same origin via a bundled loader + storage.",
+        "Inject a classic <script> tag into the page DOM (main world). Use when code must run as true page script rather than isolated execution contexts. Supports optional persistent re-injection by origin.",
       inputSchema: {
-        script: z.string().min(1).describe("JavaScript source executed as a classic script tag in the page"),
-        tabId: tabIdSchema.optional(),
-        persistent: z.boolean().optional().describe("If true, store and re-inject on future loads for this origin (registerContentScripts)"),
+        script: z.string().min(1).describe("JavaScript source inserted as a classic script tag."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
+        persistent: z.boolean().optional().describe("Persist script for future loads on same origin."),
         runAt: z
           .enum(["document_start", "document_end", "document_idle"])
           .optional()
-          .describe("When to inject (default document_idle for one-shot; persistent loader honors timing per entry)"),
+          .describe("Injection timing. Default document_idle."),
       },
     },
     async ({ script, tabId, persistent, runAt }) =>
@@ -919,18 +953,20 @@ export function registerTools(mcp: McpServer): void {
     "cookie_manager",
     {
       description:
-        "Read/write/delete cookies via chrome.cookies (Chrome profile). Actions: get, get_all, set, delete, delete_all.",
+        "Read/write/delete browser cookies via chrome.cookies. Use this for session setup, auth checks, and cookie cleanup.",
       inputSchema: {
-        action: z.enum(["get", "get_all", "set", "delete", "delete_all"]),
-        url: z.string().optional().describe("Cookie store URL (often required for get/set/delete)"),
-        name: z.string().optional(),
-        value: z.string().optional(),
-        domain: z.string().optional().describe("For get_all / delete_all / some set operations"),
-        path: z.string().optional(),
-        secure: z.boolean().optional(),
-        httpOnly: z.boolean().optional(),
-        expirationDate: z.number().optional(),
-        tabId: tabIdSchema.optional().describe("Derive url from tab when url omitted"),
+        action: z
+          .enum(["get", "get_all", "set", "delete", "delete_all"])
+          .describe("Cookie operation to run."),
+        url: z.string().optional().describe("Cookie URL scope. Often required for get/set/delete."),
+        name: z.string().optional().describe("Cookie name (required for get/set/delete)."),
+        value: z.string().optional().describe("Cookie value (required for set)."),
+        domain: z.string().optional().describe("Cookie domain (used by get_all/delete_all and some set cases)."),
+        path: z.string().optional().describe("Cookie path scope."),
+        secure: z.boolean().optional().describe("Set secure attribute when action=set."),
+        httpOnly: z.boolean().optional().describe("Set httpOnly attribute when action=set."),
+        expirationDate: z.number().optional().describe("Unix timestamp expiry for action=set."),
+        tabId: tabIdSchema.optional().describe("Use tab URL when url is omitted."),
       },
     },
     async (args) => callTool("cookie_manager", args, PENDING_REQUEST_TIMEOUT_MS)
@@ -940,12 +976,15 @@ export function registerTools(mcp: McpServer): void {
     "fill_form",
     {
       description:
-        "Fill multiple form fields in one round trip (text, select, checkbox, radio). Optional form submit via selector or default submit button.",
+        "Fill multiple form fields in one call. Use for deterministic multi-field form completion with optional submit.",
       inputSchema: {
-        fields: z.array(fillFormFieldSchema).min(1),
-        tabId: tabIdSchema.optional(),
-        submitAfter: z.boolean().optional(),
-        submitSelector: z.string().optional().describe("CSS selector for submit control; else first [type=submit] in same form"),
+        fields: z.array(fillFormFieldSchema).min(1).describe("Fields to fill in order."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
+        submitAfter: z.boolean().optional().describe("Submit form after filling fields."),
+        submitSelector: z
+          .string()
+          .optional()
+          .describe("Optional submit control selector. If omitted, uses first submit control in same form."),
       },
     },
     async ({ fields, tabId, submitAfter, submitSelector }) =>
@@ -956,11 +995,11 @@ export function registerTools(mcp: McpServer): void {
     "get_storage",
     {
       description:
-        "Read localStorage, sessionStorage (page origin), or cookies (Chrome cookie store for the tab URL). Single key or entire map.",
+        "Read storage values from localStorage, sessionStorage, or cookies. Use key for one value or omit to fetch full map.",
       inputSchema: {
-        type: z.enum(["local", "session", "cookie"]),
-        key: z.string().optional(),
-        tabId: tabIdSchema.optional(),
+        type: z.enum(["local", "session", "cookie"]).describe("Storage backend to read."),
+        key: z.string().optional().describe("Optional key name. Omit to return all keys/values."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async ({ type, key, tabId }) => callTool("get_storage", { type, key, tabId }, EVALUATE_JS_TIMEOUT_MS)
@@ -969,12 +1008,12 @@ export function registerTools(mcp: McpServer): void {
   mcp.registerTool(
     "set_storage",
     {
-      description: "Write a key to localStorage or sessionStorage in the page origin (not cookies).",
+      description: "Write one key/value to localStorage or sessionStorage for the page origin.",
       inputSchema: {
-        type: z.enum(["local", "session"]),
-        key: z.string().min(1),
-        value: z.string(),
-        tabId: tabIdSchema.optional(),
+        type: z.enum(["local", "session"]).describe("Storage backend to write."),
+        key: z.string().min(1).describe("Storage key to set."),
+        value: z.string().describe("String value to store."),
+        tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
       },
     },
     async ({ type, key, value, tabId }) =>
