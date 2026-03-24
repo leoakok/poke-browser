@@ -1,10 +1,3 @@
-## [0.4.3](https://github.com/leoakok/poke-browser/compare/v0.4.2...v0.4.3) (2026-03-24)
-
-
-### Bug Fixes
-
-* **typing:** Draft.js/React input sequence and full CDP key descriptors ([7c075c1](https://github.com/leoakok/poke-browser/commit/7c075c141e2ec21c773e446bb50f908d11458dd1))
-
 ## [0.4.5](https://github.com/leoakok/poke-browser/compare/v0.4.4...v0.4.5) (2026-03-24)
 
 
