@@ -1,3 +1,10 @@
+## [0.4.8](https://github.com/leoakok/poke-browser/compare/v0.4.7...v0.4.8) (2026-03-24)
+
+
+### Bug Fixes
+
+* **release:** trigger patch for tool description updates ([36f4d39](https://github.com/leoakok/poke-browser/commit/36f4d39215a6d35eea35419567a313acb0ef04d5))
+
 ## [0.4.7](https://github.com/leoakok/poke-browser/compare/v0.4.6...v0.4.7) (2026-03-24)
 
 
