@@ -5,6 +5,15 @@
 
 * **typing:** fire beforeinput+input synthetic events for React contentEditable and complete CDP key descriptors ([7cc8db7](https://github.com/leoakok/poke-browser/commit/7cc8db781c512ad40c709b252179b219db632e56))
 * **typing:** harden React/Draft.js contentEditable and complete CDP key map ([4c15b46](https://github.com/leoakok/poke-browser/commit/4c15b46d44ff8203d4b0184eea18fe43b0807d2d))
+* **typing:** update deps and bump to 0.4.6 for npm publish ([ec65d90](https://github.com/leoakok/poke-browser/commit/ec65d90446b7bb77a8be5568099ebcf0c6d426db))
+
+## [0.4.3](https://github.com/leoakok/poke-browser/compare/v0.4.2...v0.4.3) (2026-03-24)
+
+
+### Bug Fixes
+
+* **typing:** fire beforeinput+input synthetic events for React contentEditable and complete CDP key descriptors ([7cc8db7](https://github.com/leoakok/poke-browser/commit/7cc8db781c512ad40c709b252179b219db632e56))
+* **typing:** harden React/Draft.js contentEditable and complete CDP key map ([4c15b46](https://github.com/leoakok/poke-browser/commit/4c15b46d44ff8203d4b0184eea18fe43b0807d2d))
 
 ## [0.4.3](https://github.com/leoakok/poke-browser/compare/v0.4.2...v0.4.3) (2026-03-24)
 
