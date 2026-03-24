@@ -137,7 +137,7 @@ const BROWSER_GUIDE_MARKDOWN = `## Poke Browser MCP — agent guide
 - **browser_guide** — This playbook (static Markdown; no parameters).
 - **navigate_to** — Open a URL in a tab; waits for load (short or long timeout).
 - **click_element** — Click via CSS/XPath or viewport **x**/**y** (CDP); **1s CDP hover** (mouseMoved) at the target before the click.
-- **type_text** — Type into an input/textarea/contenteditable (or focused element); optional **clear** (default true) replaces existing value first.
+- **type_text** — Type into the currently active input/textarea/contenteditable. Recommended flow: click target field first, verify focus/active element, then type. Optional **clear** (default true) replaces existing value first.
 - **scroll_window** — Scroll the page (selector into view, absolute position, deltas, or direction).
 - **capture_screenshot** — Visible viewport screenshot (PNG/JPEG).
 - **capture_and_upload_screenshot** — Same capture, then multipart POST to \`uploadUrl\` or \`POKE_UPLOAD_URL\`; on failure returns base64 + temp path.
@@ -169,6 +169,50 @@ const BROWSER_GUIDE_MARKDOWN = `## Poke Browser MCP — agent guide
 3. **Click the center** with **click_element** using CDP coordinates: \`x + width/2\`, \`y + height/2\` (not raw guesses).
 
 This avoids brittle hard-coded pixels and matches what the user actually sees.
+
+### Input focus safety (important)
+
+Some apps render decoy/fake inputs and move focus to a different real editor after click.  
+Before **type_text**, always follow this sequence:
+
+1. **click_element** on the intended input/editor area.
+2. Confirm the currently focused element with **evaluate_js**.
+   Recommended check:
+   - \`document.activeElement?.tagName\`
+   - \`document.activeElement?.id\`
+   - \`document.activeElement?.className\`
+   - \`document.activeElement?.isContentEditable\`
+   - \`document.activeElement?.getAttribute('role')\`
+3. If focus points to the expected editor, call **type_text**.
+   - Prefer **type_text without selector** so input is sent to the real active editor.
+   - Use \`selector\` only when it exactly matches the verified focused element.
+
+If focus is wrong, do not type yet. Click again and re-check active element before typing.
+
+#### Focus handshake retry policy
+
+- Retry the click + focus-check loop up to **3 times**.
+- If focus still lands on a non-editable/decoy element, use **find_element** again with a more specific query and click a different match.
+- After any modal, popover, rerender, or route change, re-run focus check before the next **type_text**.
+
+#### Evaluate snippet example
+
+\`\`\`js
+(() => {
+  const el = document.activeElement;
+  if (!el) return { ok: false, reason: "no_active_element" };
+  return {
+    ok: true,
+    tag: el.tagName,
+    id: el.id || "",
+    className: typeof el.className === "string" ? el.className : "",
+    role: el.getAttribute?.("role") || "",
+    isContentEditable: !!el.isContentEditable,
+    type: "type" in el ? el.type : undefined,
+    ariaLabel: el.getAttribute?.("aria-label") || "",
+  };
+})();
+\`\`\`
 
 ### Cloudflare / cookie / bot walls
 
@@ -250,7 +294,7 @@ export function registerTools(mcp) {
         },
     }, async (args) => handleClickElementTool(args));
     mcp.registerTool("type_text", {
-        description: "Type text into input, textarea, or contenteditable. Prefer this over execute_script/evaluate_js for user-like editing. If selector is omitted, the currently focused element is used.",
+        description: "Type text into the currently focused editable element (input/textarea/contenteditable). Required workflow: click target field first, verify document.activeElement, then type. This prevents writing into fake/decoy inputs used by some apps. Prefer this over execute_script/evaluate_js for realistic editor behavior.",
         inputSchema: {
             text: z
                 .string()
@@ -259,20 +303,20 @@ export function registerTools(mcp) {
                 .string()
                 .min(1)
                 .optional()
-                .describe("Target field selector (CSS/XPath). If omitted, types into focused element."),
+                .describe("Optional target selector. Use only after verifying focus and only when selector matches the real active editor. Safer default: omit selector after click+focus check."),
             x: z
                 .number()
                 .optional()
-                .describe("Optional viewport X for visual cursor feedback only; does not choose element."),
+                .describe("Optional viewport X for visual cursor feedback marker only. Does not determine typing target."),
             y: z
                 .number()
                 .optional()
-                .describe("Optional viewport Y for visual cursor feedback only; does not choose element."),
+                .describe("Optional viewport Y for visual cursor feedback marker only. Does not determine typing target."),
             tabId: tabIdSchema.optional().describe("Optional target tab id; defaults to active tab."),
             clear: z
                 .boolean()
                 .optional()
-                .describe("If true (default), clear existing content first. If false, append/insert at caret."),
+                .describe("If true (default), clear existing value before typing. If false, append/insert at current caret/selection in the active editor."),
         },
     }, async ({ text, selector, x, y, tabId, clear }) => callTool("type_text", {
         text,
