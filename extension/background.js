@@ -661,6 +661,9 @@ async function clearFocusedFieldViaDebuggerKeys(tabId) {
     key: "a",
     code: "KeyA",
     windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65,
+    unmodifiedText: "a",
+    text: "a",
     modifiers: mod,
   });
   await debuggerSend(tabId, "Input.dispatchKeyEvent", {
@@ -668,6 +671,9 @@ async function clearFocusedFieldViaDebuggerKeys(tabId) {
     key: "a",
     code: "KeyA",
     windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65,
+    unmodifiedText: "a",
+    text: "a",
     modifiers: mod,
   });
   await debuggerSend(tabId, "Input.dispatchKeyEvent", {
@@ -675,13 +681,78 @@ async function clearFocusedFieldViaDebuggerKeys(tabId) {
     key: "Backspace",
     code: "Backspace",
     windowsVirtualKeyCode: 8,
+    nativeVirtualKeyCode: 8,
+    unmodifiedText: "",
+    text: "",
   });
   await debuggerSend(tabId, "Input.dispatchKeyEvent", {
     type: "keyUp",
     key: "Backspace",
     code: "Backspace",
     windowsVirtualKeyCode: 8,
+    nativeVirtualKeyCode: 8,
+    unmodifiedText: "",
+    text: "",
   });
+}
+
+/**
+ * US QWERTY-style `code` + Windows virtual key codes for CDP Input.dispatchKeyEvent.
+ * @param {string} ch Single UTF-16 code unit
+ * @returns {{ key: string, code: string, windowsVirtualKeyCode: number, nativeVirtualKeyCode: number }}
+ */
+function cdpKeyDescriptorForPrintableChar(ch) {
+  const cp = ch.codePointAt(0);
+  if (cp >= 65 && cp <= 90) {
+    const k = String.fromCharCode(cp);
+    return {
+      key: ch,
+      code: `Key${k}`,
+      windowsVirtualKeyCode: cp,
+      nativeVirtualKeyCode: cp,
+    };
+  }
+  if (cp >= 97 && cp <= 122) {
+    const up = String.fromCharCode(cp - 32);
+    return {
+      key: ch,
+      code: `Key${up}`,
+      windowsVirtualKeyCode: up.charCodeAt(0),
+      nativeVirtualKeyCode: up.charCodeAt(0),
+    };
+  }
+  if (cp >= 48 && cp <= 57) {
+    return {
+      key: ch,
+      code: `Digit${ch}`,
+      windowsVirtualKeyCode: cp,
+      nativeVirtualKeyCode: cp,
+    };
+  }
+  if (ch === " ") {
+    return { key: " ", code: "Space", windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 32 };
+  }
+
+  /** @type {Record<string, readonly [string, number]>} */
+  const punct = {
+    "`": ["Backquote", 192],
+    "-": ["Minus", 189],
+    "=": ["Equal", 187],
+    "[": ["BracketLeft", 219],
+    "]": ["BracketRight", 221],
+    "\\": ["Backslash", 220],
+    ";": ["Semicolon", 186],
+    "'": ["Quote", 222],
+    ",": ["Comma", 188],
+    ".": ["Period", 190],
+    "/": ["Slash", 191],
+  };
+  const p = punct[ch];
+  if (p) {
+    return { key: ch, code: p[0], windowsVirtualKeyCode: p[1], nativeVirtualKeyCode: p[1] };
+  }
+
+  return { key: ch, code: "", windowsVirtualKeyCode: 0, nativeVirtualKeyCode: 0 };
 }
 
 /**
@@ -696,30 +767,31 @@ async function typeTextViaDebugger(tabId, text, clearField) {
       await clearFocusedFieldViaDebuggerKeys(tabId);
     }
     for (const ch of text) {
-      if (ch === "\n" || ch === "\r") {
-        if (ch === "\r") continue;
-        await debuggerSend(tabId, "Input.dispatchKeyEvent", {
-          type: "keyDown",
+      if (ch === "\r") continue;
+      if (ch === "\n") {
+        const enter = {
           key: "Enter",
           code: "Enter",
           windowsVirtualKeyCode: 13,
-        });
-        await debuggerSend(tabId, "Input.dispatchKeyEvent", {
-          type: "keyUp",
-          key: "Enter",
-          code: "Enter",
-          windowsVirtualKeyCode: 13,
-        });
+          nativeVirtualKeyCode: 13,
+          unmodifiedText: "\r",
+          text: "\r",
+        };
+        await debuggerSend(tabId, "Input.dispatchKeyEvent", { type: "keyDown", ...enter });
+        await debuggerSend(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...enter });
         continue;
       }
-      await debuggerSend(tabId, "Input.dispatchKeyEvent", {
-        type: "keyDown",
+      const d = cdpKeyDescriptorForPrintableChar(ch);
+      const payload = {
+        key: d.key,
+        code: d.code,
+        windowsVirtualKeyCode: d.windowsVirtualKeyCode,
+        nativeVirtualKeyCode: d.nativeVirtualKeyCode,
+        unmodifiedText: ch,
         text: ch,
-      });
-      await debuggerSend(tabId, "Input.dispatchKeyEvent", {
-        type: "keyUp",
-        text: ch,
-      });
+      };
+      await debuggerSend(tabId, "Input.dispatchKeyEvent", { type: "keyDown", ...payload });
+      await debuggerSend(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...payload });
     }
     return { success: true, charsTyped: text.length };
   } finally {

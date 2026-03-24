@@ -257,6 +257,46 @@ function handleResolveClickPoint(message, sendResponse) {
 }
 
 /**
+ * React / Draft.js-style editors listen for `beforeinput` + `input` (InputEvent) rather than only
+ * mutating textContent. Mirror native insertion order: beforeinput → DOM update → input → change.
+ * @param {HTMLElement} el
+ * @param {string} text
+ * @param {boolean} shouldClear
+ */
+function insertTextIntoContentEditable(el, text, shouldClear) {
+  el.focus();
+  if (shouldClear) {
+    const sel = window.getSelection();
+    if (sel && el.firstChild) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    document.execCommand("delete");
+  }
+
+  const evInit = /** @type {InputEventInit} */ ({
+    bubbles: true,
+    composed: true,
+    inputType: "insertText",
+    data: text,
+  });
+  el.dispatchEvent(
+    new InputEvent("beforeinput", { ...evInit, cancelable: true })
+  );
+
+  if (shouldClear) {
+    el.textContent = text;
+  } else {
+    el.textContent = (el.textContent || "") + text;
+  }
+
+  el.dispatchEvent(new InputEvent("input", { ...evInit, cancelable: false }));
+  el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+}
+
+/**
  * @param {unknown} message
  * @param {(r: unknown) => void} sendResponse
  */
@@ -278,22 +318,7 @@ function handleTypeText(message, sendResponse) {
 
   try {
     if (el.isContentEditable) {
-      el.focus();
-      if (shouldClear) {
-        const sel = window.getSelection();
-        if (sel && el.firstChild) {
-          const range = document.createRange();
-          range.selectNodeContents(el);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-        document.execCommand("delete");
-        el.textContent = text;
-      } else {
-        el.textContent = (el.textContent || "") + text;
-      }
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
+      insertTextIntoContentEditable(el, text, shouldClear);
       sendResponse({ success: true, charsTyped: text.length });
       return;
     }
