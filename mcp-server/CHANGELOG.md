@@ -1,3 +1,10 @@
+## [0.4.4](https://github.com/leoakok/poke-browser/compare/v0.4.3...v0.4.4) (2026-03-24)
+
+
+### Bug Fixes
+
+* harden typing logic and stabilize event sequence for Draft.js editors ([570deec](https://github.com/leoakok/poke-browser/commit/570deec575776e8e9e1b43360e2bd807780c70e2))
+
 ## [0.4.3](https://github.com/leoakok/poke-browser/compare/v0.4.2...v0.4.3) (2026-03-24)
 
 
