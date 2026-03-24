@@ -661,13 +661,20 @@ async function clearFocusedFieldViaDebuggerKeys(tabId) {
     key: "a",
     code: "KeyA",
     windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65,
+    unmodifiedText: "a",
+    text: "a",
     modifiers: mod,
+    autoRepeat: false,
   });
   await debuggerSend(tabId, "Input.dispatchKeyEvent", {
     type: "keyUp",
     key: "a",
     code: "KeyA",
     windowsVirtualKeyCode: 65,
+    nativeVirtualKeyCode: 65,
+    unmodifiedText: "a",
+    text: "a",
     modifiers: mod,
   });
   await debuggerSend(tabId, "Input.dispatchKeyEvent", {
@@ -675,13 +682,357 @@ async function clearFocusedFieldViaDebuggerKeys(tabId) {
     key: "Backspace",
     code: "Backspace",
     windowsVirtualKeyCode: 8,
+    nativeVirtualKeyCode: 8,
+    unmodifiedText: "",
+    text: "",
+    modifiers: 0,
+    autoRepeat: false,
   });
   await debuggerSend(tabId, "Input.dispatchKeyEvent", {
     type: "keyUp",
     key: "Backspace",
     code: "Backspace",
     windowsVirtualKeyCode: 8,
+    nativeVirtualKeyCode: 8,
+    unmodifiedText: "",
+    text: "",
+    modifiers: 0,
   });
+}
+
+/**
+ * US QWERTY CDP key fields for printable ASCII (Input.dispatchKeyEvent).
+ * @typedef {{ key: string, code: string, windowsVirtualKeyCode: number, nativeVirtualKeyCode: number, modifiers: number, unmodifiedText: string, text: string }} CdpPrintableDescriptor
+ */
+
+/**
+ * @param {string} ch Single UTF-16 code unit
+ * @returns {CdpPrintableDescriptor}
+ */
+function cdpKeyDescriptorForPrintableChar(ch) {
+  const cp = ch.codePointAt(0);
+
+  if (cp >= 97 && cp <= 122) {
+    const up = String.fromCharCode(cp - 32);
+    return {
+      key: ch,
+      code: `Key${up}`,
+      windowsVirtualKeyCode: up.charCodeAt(0),
+      nativeVirtualKeyCode: up.charCodeAt(0),
+      modifiers: 0,
+      unmodifiedText: ch,
+      text: ch,
+    };
+  }
+  if (cp >= 65 && cp <= 90) {
+    const low = String.fromCharCode(cp + 32);
+    return {
+      key: ch,
+      code: `Key${ch}`,
+      windowsVirtualKeyCode: cp,
+      nativeVirtualKeyCode: cp,
+      modifiers: 8,
+      unmodifiedText: low,
+      text: ch,
+    };
+  }
+  if (cp >= 48 && cp <= 57) {
+    return {
+      key: ch,
+      code: `Digit${ch}`,
+      windowsVirtualKeyCode: cp,
+      nativeVirtualKeyCode: cp,
+      modifiers: 0,
+      unmodifiedText: ch,
+      text: ch,
+    };
+  }
+  if (ch === " ") {
+    return {
+      key: " ",
+      code: "Space",
+      windowsVirtualKeyCode: 32,
+      nativeVirtualKeyCode: 32,
+      modifiers: 0,
+      unmodifiedText: " ",
+      text: " ",
+    };
+  }
+
+  /** @type {Record<string, Omit<CdpPrintableDescriptor, "key">>} */
+  const map = {
+    "`": {
+      code: "Backquote",
+      windowsVirtualKeyCode: 192,
+      nativeVirtualKeyCode: 192,
+      modifiers: 0,
+      unmodifiedText: "`",
+      text: "`",
+    },
+    "-": {
+      code: "Minus",
+      windowsVirtualKeyCode: 189,
+      nativeVirtualKeyCode: 189,
+      modifiers: 0,
+      unmodifiedText: "-",
+      text: "-",
+    },
+    "=": {
+      code: "Equal",
+      windowsVirtualKeyCode: 187,
+      nativeVirtualKeyCode: 187,
+      modifiers: 0,
+      unmodifiedText: "=",
+      text: "=",
+    },
+    "[": {
+      code: "BracketLeft",
+      windowsVirtualKeyCode: 219,
+      nativeVirtualKeyCode: 219,
+      modifiers: 0,
+      unmodifiedText: "[",
+      text: "[",
+    },
+    "]": {
+      code: "BracketRight",
+      windowsVirtualKeyCode: 221,
+      nativeVirtualKeyCode: 221,
+      modifiers: 0,
+      unmodifiedText: "]",
+      text: "]",
+    },
+    "\\": {
+      code: "Backslash",
+      windowsVirtualKeyCode: 220,
+      nativeVirtualKeyCode: 220,
+      modifiers: 0,
+      unmodifiedText: "\\",
+      text: "\\",
+    },
+    ";": {
+      code: "Semicolon",
+      windowsVirtualKeyCode: 186,
+      nativeVirtualKeyCode: 186,
+      modifiers: 0,
+      unmodifiedText: ";",
+      text: ";",
+    },
+    "'": {
+      code: "Quote",
+      windowsVirtualKeyCode: 222,
+      nativeVirtualKeyCode: 222,
+      modifiers: 0,
+      unmodifiedText: "'",
+      text: "'",
+    },
+    ",": {
+      code: "Comma",
+      windowsVirtualKeyCode: 188,
+      nativeVirtualKeyCode: 188,
+      modifiers: 0,
+      unmodifiedText: ",",
+      text: ",",
+    },
+    ".": {
+      code: "Period",
+      windowsVirtualKeyCode: 190,
+      nativeVirtualKeyCode: 190,
+      modifiers: 0,
+      unmodifiedText: ".",
+      text: ".",
+    },
+    "/": {
+      code: "Slash",
+      windowsVirtualKeyCode: 191,
+      nativeVirtualKeyCode: 191,
+      modifiers: 0,
+      unmodifiedText: "/",
+      text: "/",
+    },
+    "!": {
+      code: "Digit1",
+      windowsVirtualKeyCode: 49,
+      nativeVirtualKeyCode: 49,
+      modifiers: 8,
+      unmodifiedText: "1",
+      text: "!",
+    },
+    "@": {
+      code: "Digit2",
+      windowsVirtualKeyCode: 50,
+      nativeVirtualKeyCode: 50,
+      modifiers: 8,
+      unmodifiedText: "2",
+      text: "@",
+    },
+    "#": {
+      code: "Digit3",
+      windowsVirtualKeyCode: 51,
+      nativeVirtualKeyCode: 51,
+      modifiers: 8,
+      unmodifiedText: "3",
+      text: "#",
+    },
+    $: {
+      code: "Digit4",
+      windowsVirtualKeyCode: 52,
+      nativeVirtualKeyCode: 52,
+      modifiers: 8,
+      unmodifiedText: "4",
+      text: "$",
+    },
+    "%": {
+      code: "Digit5",
+      windowsVirtualKeyCode: 53,
+      nativeVirtualKeyCode: 53,
+      modifiers: 8,
+      unmodifiedText: "5",
+      text: "%",
+    },
+    "^": {
+      code: "Digit6",
+      windowsVirtualKeyCode: 54,
+      nativeVirtualKeyCode: 54,
+      modifiers: 8,
+      unmodifiedText: "6",
+      text: "^",
+    },
+    "&": {
+      code: "Digit7",
+      windowsVirtualKeyCode: 55,
+      nativeVirtualKeyCode: 55,
+      modifiers: 8,
+      unmodifiedText: "7",
+      text: "&",
+    },
+    "*": {
+      code: "Digit8",
+      windowsVirtualKeyCode: 56,
+      nativeVirtualKeyCode: 56,
+      modifiers: 8,
+      unmodifiedText: "8",
+      text: "*",
+    },
+    "(": {
+      code: "Digit9",
+      windowsVirtualKeyCode: 57,
+      nativeVirtualKeyCode: 57,
+      modifiers: 8,
+      unmodifiedText: "9",
+      text: "(",
+    },
+    ")": {
+      code: "Digit0",
+      windowsVirtualKeyCode: 48,
+      nativeVirtualKeyCode: 48,
+      modifiers: 8,
+      unmodifiedText: "0",
+      text: ")",
+    },
+    _: {
+      code: "Minus",
+      windowsVirtualKeyCode: 189,
+      nativeVirtualKeyCode: 189,
+      modifiers: 8,
+      unmodifiedText: "-",
+      text: "_",
+    },
+    "+": {
+      code: "Equal",
+      windowsVirtualKeyCode: 187,
+      nativeVirtualKeyCode: 187,
+      modifiers: 8,
+      unmodifiedText: "=",
+      text: "+",
+    },
+    "{": {
+      code: "BracketLeft",
+      windowsVirtualKeyCode: 219,
+      nativeVirtualKeyCode: 219,
+      modifiers: 8,
+      unmodifiedText: "[",
+      text: "{",
+    },
+    "}": {
+      code: "BracketRight",
+      windowsVirtualKeyCode: 221,
+      nativeVirtualKeyCode: 221,
+      modifiers: 8,
+      unmodifiedText: "]",
+      text: "}",
+    },
+    "|": {
+      code: "Backslash",
+      windowsVirtualKeyCode: 220,
+      nativeVirtualKeyCode: 220,
+      modifiers: 8,
+      unmodifiedText: "\\",
+      text: "|",
+    },
+    ":": {
+      code: "Semicolon",
+      windowsVirtualKeyCode: 186,
+      nativeVirtualKeyCode: 186,
+      modifiers: 8,
+      unmodifiedText: ";",
+      text: ":",
+    },
+    '"': {
+      code: "Quote",
+      windowsVirtualKeyCode: 222,
+      nativeVirtualKeyCode: 222,
+      modifiers: 8,
+      unmodifiedText: "'",
+      text: '"',
+    },
+    "<": {
+      code: "Comma",
+      windowsVirtualKeyCode: 188,
+      nativeVirtualKeyCode: 188,
+      modifiers: 8,
+      unmodifiedText: ",",
+      text: "<",
+    },
+    ">": {
+      code: "Period",
+      windowsVirtualKeyCode: 190,
+      nativeVirtualKeyCode: 190,
+      modifiers: 8,
+      unmodifiedText: ".",
+      text: ">",
+    },
+    "?": {
+      code: "Slash",
+      windowsVirtualKeyCode: 191,
+      nativeVirtualKeyCode: 191,
+      modifiers: 8,
+      unmodifiedText: "/",
+      text: "?",
+    },
+    "~": {
+      code: "Backquote",
+      windowsVirtualKeyCode: 192,
+      nativeVirtualKeyCode: 192,
+      modifiers: 8,
+      unmodifiedText: "`",
+      text: "~",
+    },
+  };
+
+  const row = map[ch];
+  if (row) {
+    return { key: ch, ...row };
+  }
+
+  return {
+    key: ch,
+    code: "",
+    windowsVirtualKeyCode: 0,
+    nativeVirtualKeyCode: 0,
+    modifiers: 0,
+    unmodifiedText: ch,
+    text: ch,
+  };
 }
 
 /**
@@ -696,30 +1047,41 @@ async function typeTextViaDebugger(tabId, text, clearField) {
       await clearFocusedFieldViaDebuggerKeys(tabId);
     }
     for (const ch of text) {
-      if (ch === "\n" || ch === "\r") {
-        if (ch === "\r") continue;
+      if (ch === "\r") continue;
+      if (ch === "\n") {
+        const enterBase = {
+          key: "Enter",
+          code: "Enter",
+          windowsVirtualKeyCode: 13,
+          nativeVirtualKeyCode: 13,
+          unmodifiedText: "\r",
+          text: "\r",
+          modifiers: 0,
+        };
         await debuggerSend(tabId, "Input.dispatchKeyEvent", {
           type: "keyDown",
-          key: "Enter",
-          code: "Enter",
-          windowsVirtualKeyCode: 13,
+          ...enterBase,
+          autoRepeat: false,
         });
-        await debuggerSend(tabId, "Input.dispatchKeyEvent", {
-          type: "keyUp",
-          key: "Enter",
-          code: "Enter",
-          windowsVirtualKeyCode: 13,
-        });
+        await debuggerSend(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...enterBase });
         continue;
       }
+      const d = cdpKeyDescriptorForPrintableChar(ch);
+      const payload = {
+        key: d.key,
+        code: d.code,
+        windowsVirtualKeyCode: d.windowsVirtualKeyCode,
+        nativeVirtualKeyCode: d.nativeVirtualKeyCode,
+        unmodifiedText: d.unmodifiedText,
+        text: d.text,
+        modifiers: d.modifiers,
+      };
       await debuggerSend(tabId, "Input.dispatchKeyEvent", {
         type: "keyDown",
-        text: ch,
+        ...payload,
+        autoRepeat: false,
       });
-      await debuggerSend(tabId, "Input.dispatchKeyEvent", {
-        type: "keyUp",
-        text: ch,
-      });
+      await debuggerSend(tabId, "Input.dispatchKeyEvent", { type: "keyUp", ...payload });
     }
     return { success: true, charsTyped: text.length };
   } finally {

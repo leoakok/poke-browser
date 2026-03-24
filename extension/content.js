@@ -257,6 +257,130 @@ function handleResolveClickPoint(message, sendResponse) {
 }
 
 /**
+ * React / Draft.js-style editors listen for `beforeinput` + `input` (InputEvent) rather than only
+ * mutating textContent. Mirror native insertion order: beforeinput → DOM update → input → change.
+ * Helps placeholder clearing and submit affordances on Draft.js surfaces (e.g. X.com, LinkedIn).
+ * @param {HTMLElement} el
+ * @param {string} text
+ * @param {boolean} shouldClear
+ */
+function insertTextIntoContentEditable(el, text, shouldClear) {
+  /** `focus()` can drop a programmatic selection; preserve caret for insert-at-cursor. */
+  let savedRange = null;
+  if (!shouldClear) {
+    const pre = window.getSelection();
+    if (pre && pre.rangeCount > 0) {
+      const r = pre.getRangeAt(0);
+      if (el.contains(r.commonAncestorContainer)) {
+        savedRange = r.cloneRange();
+      }
+    }
+  }
+
+  el.focus();
+  const sel = window.getSelection();
+  if (shouldClear) {
+    if (sel) {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    document.execCommand("delete");
+  } else if (savedRange && sel) {
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+  }
+
+  const evInit = /** @type {InputEventInit} */ ({
+    bubbles: true,
+    composed: true,
+    inputType: "insertText",
+    data: text,
+  });
+  el.dispatchEvent(new InputEvent("beforeinput", { ...evInit, cancelable: true }));
+
+  if (shouldClear) {
+    el.textContent = text;
+  } else if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    if (el.contains(range.commonAncestorContainer)) {
+      const cc = range.commonAncestorContainer;
+      if (cc.nodeType === 3) {
+        const node = /** @type {Text} */ (cc);
+        const offset = range.startOffset;
+        const t = node.textContent ?? "";
+        const before = t.slice(0, offset);
+        const after = t.slice(offset);
+        node.textContent = before + text + after;
+        range.setStart(node, before.length + text.length);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } else {
+        range.deleteContents();
+        const tn = document.createTextNode(text);
+        range.insertNode(tn);
+        range.setStartAfter(tn);
+        range.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    } else {
+      el.textContent = (el.textContent || "") + text;
+    }
+  } else {
+    el.textContent = (el.textContent || "") + text;
+  }
+
+  el.dispatchEvent(new InputEvent("input", { ...evInit, cancelable: false }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+/**
+ * Same InputEvent ordering for `<input>` / `<textarea>` (React-controlled fields).
+ * @param {HTMLInputElement | HTMLTextAreaElement} input
+ * @param {string} text
+ * @param {boolean} shouldClear
+ */
+function insertTextIntoFormControl(input, text, shouldClear) {
+  let start = 0;
+  let end = input.value.length;
+  if (!shouldClear) {
+    start = typeof input.selectionStart === "number" ? input.selectionStart : input.value.length;
+    end = typeof input.selectionEnd === "number" ? input.selectionEnd : input.value.length;
+  }
+
+  input.focus();
+  if (shouldClear) {
+    input.select();
+    document.execCommand("delete");
+  }
+
+  const evInit = /** @type {InputEventInit} */ ({
+    bubbles: true,
+    composed: true,
+    inputType: "insertText",
+    data: text,
+  });
+  input.dispatchEvent(new InputEvent("beforeinput", { ...evInit, cancelable: true }));
+
+  if (shouldClear) {
+    input.value = text;
+  } else {
+    const v = input.value;
+    input.value = v.slice(0, start) + text + v.slice(end);
+    const pos = start + text.length;
+    if (typeof input.setSelectionRange === "function") {
+      input.setSelectionRange(pos, pos);
+    }
+  }
+
+  input.dispatchEvent(new InputEvent("input", { ...evInit, cancelable: false }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+/**
  * @param {unknown} message
  * @param {(r: unknown) => void} sendResponse
  */
@@ -278,39 +402,14 @@ function handleTypeText(message, sendResponse) {
 
   try {
     if (el.isContentEditable) {
-      el.focus();
-      if (shouldClear) {
-        const sel = window.getSelection();
-        if (sel && el.firstChild) {
-          const range = document.createRange();
-          range.selectNodeContents(el);
-          sel.removeAllRanges();
-          sel.addRange(range);
-        }
-        document.execCommand("delete");
-        el.textContent = text;
-      } else {
-        el.textContent = (el.textContent || "") + text;
-      }
-      el.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
+      insertTextIntoContentEditable(el, text, shouldClear);
       sendResponse({ success: true, charsTyped: text.length });
       return;
     }
 
     const tag = el.tagName.toLowerCase();
     if (tag === "input" || tag === "textarea") {
-      const input = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (el);
-      input.focus();
-      if (shouldClear) {
-        input.select();
-        document.execCommand("delete");
-        input.value = text;
-      } else {
-        input.value = (input.value || "") + text;
-      }
-      input.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
+      insertTextIntoFormControl(/** @type {HTMLInputElement | HTMLTextAreaElement} */ (el), text, shouldClear);
       sendResponse({ success: true, charsTyped: text.length });
       return;
     }
