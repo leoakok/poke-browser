@@ -1,3 +1,6 @@
+// semantic-release uses only tags reachable from `main`. Orphan tags (e.g. after history
+// rewrite) still block `git tag vX` if vX already exists globally — keep highest merged tag
+// aligned with package.json (e.g. tag v0.4.5 on the chore(release) commit).
 module.exports = {
   branches: ["main"],
   plugins: [
