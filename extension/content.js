@@ -259,6 +259,7 @@ function handleResolveClickPoint(message, sendResponse) {
 /**
  * React / Draft.js-style editors listen for `beforeinput` + `input` (InputEvent) rather than only
  * mutating textContent. Mirror native insertion order: beforeinput → DOM update → input → change.
+ * Clears placeholder text and enables Post buttons on Draft.js editors (X.com, LinkedIn, etc.).
  * @param {HTMLElement} el
  * @param {string} text
  * @param {boolean} shouldClear
