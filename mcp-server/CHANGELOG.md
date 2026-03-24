@@ -1,3 +1,10 @@
+## [0.4.3](https://github.com/leoakok/poke-browser/compare/v0.4.2...v0.4.3) (2026-03-24)
+
+
+### Bug Fixes
+
+* **typing:** fire beforeinput+input synthetic events for React contentEditable and complete CDP key descriptors ([7cc8db7](https://github.com/leoakok/poke-browser/commit/7cc8db781c512ad40c709b252179b219db632e56))
+
 ## [0.4.2](https://github.com/leoakok/poke-browser/compare/v0.4.1...v0.4.2) (2026-03-23)
 
 
