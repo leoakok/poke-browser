@@ -1,3 +1,10 @@
+## [0.4.7](https://github.com/leoakok/poke-browser/compare/v0.4.6...v0.4.7) (2026-03-24)
+
+
+### Bug Fixes
+
+* **release:** keep extension manifest synced in semantic-release ([3353417](https://github.com/leoakok/poke-browser/commit/33534171fb0853446b9a62e6138dfcdcce04eb31))
+
 ## [0.4.6](https://github.com/leoakok/poke-browser/compare/v0.4.5...v0.4.6) (2026-03-24)
 
 
