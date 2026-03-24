@@ -1,3 +1,10 @@
+## [0.4.5](https://github.com/leoakok/poke-browser/compare/v0.4.4...v0.4.5) (2026-03-24)
+
+
+### Bug Fixes
+
+* Restore extension and server tree to [c173e98](https://github.com/leoakok/poke-browser/commit/c173e983ca6046e5aa04560f32b0b6068c05e63c) (last known good) and republish as 0.4.5.
+
 ## [0.4.2](https://github.com/leoakok/poke-browser/compare/v0.4.1...v0.4.2) (2026-03-23)
 
 
